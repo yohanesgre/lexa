@@ -6,6 +6,7 @@
 // no longer decides it.
 
 import { resolvePublicUrl, type RuntimeEnv } from "./env";
+import { emailDeliveryConfigured } from "./services/email.service";
 
 export type AssistantFlavor = "bun" | "workers";
 
@@ -24,12 +25,13 @@ export interface Capabilities {
   // Server-derived config (never the request Host or window.location); it is
   // not a secret and does not depend on the assistant/provider flags.
   mcpUrl: string;
+  // Self-service password recovery is possible only where the Worker can
+  // actually deliver: native EMAIL binding + valid LXK_EMAIL_FROM + safe
+  // canonical origin. No sender/binding/quota detail is ever public.
+  passwordRecovery: boolean;
 }
 
-export type CapabilityEnv = Pick<
-  RuntimeEnv,
-  "LXK_SECRETS_MASTER_KEY" | "LXK_DISABLE_CHAT_ATTACHMENTS" | "LXK_DISABLE_TASKS_BULK" | "LXK_PUBLIC_URL"
->;
+export type CapabilityEnv = RuntimeEnv;
 
 /** The assistant is available only where the master key is resolvable. */
 export function hasSecretsMasterKey(env: CapabilityEnv): boolean {
@@ -58,6 +60,7 @@ export function capabilities(flavor: AssistantFlavor, env: CapabilityEnv): Capab
     chatAttachments: assistant && chatAttachmentsEnabled(env),
     tasksBulk: tasksBulkEnabled(env),
     mcpUrl: `${resolvePublicUrl(env).replace(/\/+$/, "")}/mcp`,
+    passwordRecovery: flavor === "workers" && emailDeliveryConfigured(env),
   };
 }
 

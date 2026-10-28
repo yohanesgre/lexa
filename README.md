@@ -15,7 +15,7 @@ provisions D1 + R2 + KV and deploys the prebuilt Worker
 - **Nested wiki** — hierarchical pages, FTS5 full-text search, revisions with restore, public share links
 - **Milestones** — goals above sprints with target dates, progress tracking, timeline gantt
 - **AI Assistant** (Cloudflare Workers deploy only) — streaming chat with threads, document Generate with review-in-editor, a multi-provider gateway, builtin agent + skills rule bundles, and a proposed-actions approval flow for task/wiki writes
-- **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for scripts and the CLI
+- **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, self-service password recovery when Cloudflare email is configured, `lxk_` API keys for scripts and the CLI
 - **Remote MCP server**: a Streamable HTTP `/mcp` endpoint so an external MCP client (OpenBot and other hosts) acts as a personal key's owner with 22 project, task, activity, and wiki tools; stateless, personal bearer only, no per-key scopes
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
 - **`lx`** — headless operator CLI for tasks, wiki, projects, GitHub status, and upgrades; also the integration surface for external agents
@@ -170,6 +170,7 @@ is the one tracked exception):
 |---|---|
 | Local dev (`.env.toml`) | `bun run setup` writes it and records `LXK_ADMIN_EMAILS`; API keys minted post-setup; GitHub sync configured in the web app |
 | Self-hosted (install script) | the script writes `cf-workers/.env.toml` (0600) as custody for `LXK_SECRETS_MASTER_KEY` and pushes it to the Worker as a secret; D1/R2/KV are provisioned under `--name`. API keys minted post-setup (login → Settings → API Keys); the master key is preserved across re-runs |
+| Transactional email (optional, Workers only) | Cloudflare Email Sending (Beta) requires domain onboarding first. Pass `--email-from <verified-sender>` (or `LXK_EMAIL_FROM`) at install; the deploy config carries the native `EMAIL` binding and the sender, preserved on re-runs/upgrades. Without it, email is off and links stay copy-only. Local `wrangler dev` only simulates sends; inbox delivery is a manual rollout check |
 | Optional | `LXK_ASSISTANT_REPO_CAP` (Workers-only assistant repo-grounding cap, default 3), `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation

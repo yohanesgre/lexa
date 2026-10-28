@@ -99,6 +99,7 @@ export interface WorkerConfigJson {
   migrations?: Array<Record<string, unknown>>;
   services?: Array<Record<string, unknown>>;
   ai?: Record<string, unknown>;
+  send_email?: unknown;
   triggers?: Record<string, unknown>;
   observability?: Record<string, unknown>;
 }
@@ -462,6 +463,11 @@ export function buildUpgradeConfig(
   if (prior.d1_databases !== undefined) config.d1_databases = prior.d1_databases;
   if (prior.r2_buckets !== undefined) config.r2_buckets = prior.r2_buckets;
   if (prior.kv_namespaces !== undefined) config.kv_namespaces = prior.kv_namespaces;
+  // Native Email Sending: a matching build declares `send_email` in root; a
+  // config rebuilt from an older tarball keeps the prior binding. The sender
+  // itself is a preserved var (LXK_EMAIL_FROM), never regenerated here.
+  const sendEmail = root?.send_email ?? prior.send_email;
+  if (sendEmail !== undefined) config.send_email = sendEmail;
   // ADR-0005's legacy delete-class tag for a DO-era deployment, then ADR-0006's
   // supervisor binding + create tag on top of whatever history results.
   config.durable_objects = chatSupervisorDurableObjects();

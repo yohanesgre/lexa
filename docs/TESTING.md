@@ -94,9 +94,21 @@ Titles come from `scripts/check-invariants.ts`; evidence is grep-verified agains
   traversal, user isolation, persisted mutation results),
   `server/ssrf.test.ts`, `server/api/{auth-key,rate-limit}.test.ts`,
   `server/services/{wiki,workspace-invites}.test.ts`, `app/routes/share.$token.test.tsx`,
-  `shared/safe-href.test.ts`.
+  `shared/safe-href.test.ts`, `server/auth-recovery.test.ts` (atomic rolling
+  recovery admission across the 1/address/60s, 5/address/hour, 10/IP/10min
+  windows; uniform acknowledgement before lookup; unknown/banned produce no
+  issuance; malformed/disallowed-origin/unconfigured rejection),
+  `server/auth.factory.test.ts` (native 30-minute self-service token uses the
+  configured sender and skips a deactivated account; issuing-instance adapter
+  isolation across two auth instances), `server/services/email.service.test.ts`
+  (accepted vs known rejection vs unrecognized transport/internal outcome),
+  and the retained
+  `server/services/workspace-invites.test.ts` reset case (single use + requester
+  session-cookie expiry).
 - **Migrations & upgrades** — `server/db/{migrate,backfills}.test.ts`,
-  `server/assistant/legacy-convert.test.ts`, `cli/src/{worker-upgrade,upgrade-process}.test.ts`.
+  `server/assistant/legacy-convert.test.ts`, `cli/src/{worker-upgrade,upgrade-process}.test.ts`,
+  `server/workers-entry.test.ts` (maintenance purge removes expired
+  `recovery_requests` rows while keeping live ones).
 - **Destructive CLI** — `cli/src/{worker-upgrade,upgrade-process,release,index.admin-settings}.test.ts`
   (`--yes` guard, secret display discipline, backup/restore, tag + checksum integrity).
 - **Data-loss / contract guards** — `server/repos/assistant-thread.repo.test.ts` (transcript truncate CAS

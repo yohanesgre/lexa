@@ -87,10 +87,13 @@ describe("runScheduledCore", () => {
         { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
         { sql: "CREATE TABLE device_login_requests (id TEXT PRIMARY KEY, expires_at TEXT)", params: [] },
         { sql: "CREATE TABLE runtime_events (id TEXT PRIMARY KEY, status TEXT, finished_at TEXT)", params: [] },
+        { sql: "CREATE TABLE recovery_requests (id TEXT PRIMARY KEY, address_hash TEXT NOT NULL, ip_hash TEXT NOT NULL, requested_at INTEGER NOT NULL)", params: [] },
         { sql: "INSERT INTO webhook_events (delivery_id, received_at) VALUES ('old', datetime('now', '-8 days'))", params: [] },
         { sql: "INSERT INTO webhook_events (delivery_id, received_at) VALUES ('new', datetime('now'))", params: [] },
         { sql: "INSERT INTO device_login_requests (id, expires_at) VALUES ('expired', datetime('now', '-1 minute'))", params: [] },
         { sql: "INSERT INTO device_login_requests (id, expires_at) VALUES ('live', datetime('now', '+10 minutes'))", params: [] },
+        { sql: "INSERT INTO recovery_requests (id, address_hash, ip_hash, requested_at) VALUES ('stale', 'a', 'i', CAST(strftime('%s', 'now') AS INTEGER) - 4000)", params: [] },
+        { sql: "INSERT INTO recovery_requests (id, address_hash, ip_hash, requested_at) VALUES ('recent', 'a', 'i', CAST(strftime('%s', 'now') AS INTEGER) - 10)", params: [] },
       ])
     );
     const r2 = fakeR2([
@@ -111,10 +114,11 @@ describe("runScheduledCore", () => {
         const { queryAll } = yield* Effect.promise(() => import("./db/db"));
         const w = yield* queryAll<{ delivery_id: string }>(driver, "SELECT delivery_id FROM webhook_events");
         const d = yield* queryAll<{ id: string }>(driver, "SELECT id FROM device_login_requests");
-        return { webhooks: w.map((x) => x.delivery_id).sort(), devices: d.map((x) => x.id).sort() };
+        const r = yield* queryAll<{ id: string }>(driver, "SELECT id FROM recovery_requests");
+        return { webhooks: w.map((x) => x.delivery_id).sort(), devices: d.map((x) => x.id).sort(), recovery: r.map((x) => x.id).sort() };
       })
     );
-    expect(remaining).toEqual({ webhooks: ["new"], devices: ["live"] });
+    expect(remaining).toEqual({ webhooks: ["new"], devices: ["live"], recovery: ["recent"] });
     expect(r2.deleted.sort()).toEqual(["backups/lexa-2026-09-01-00-00-00.db.gz"]);
 
     const disabled = fakeR2(["backups/lexa-old.db.gz"]);

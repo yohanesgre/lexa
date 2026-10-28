@@ -7,6 +7,35 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Added
+
+- **Transactional email on Cloudflare Workers.** Self-service password
+  recovery, workspace-invitation emails, and admin set-password emails now use
+  the native Workers `send_email` binding (`EMAIL`) with a bare
+  `LXK_EMAIL_FROM` sender — Cloudflare Email Sending only, no SMTP, provider
+  registry, Bun transport, queue, retry loop, delivery table, or send history.
+  `GET /api/capabilities` adds `passwordRecovery` (true only with binding,
+  sender, and a safe canonical origin); otherwise the login page keeps the
+  contact-admin path and admin links stay manual. Recovery keeps the existing
+  keyless `POST /api/auth/request-password-reset` route but wraps it with the
+  auth body cap, Origin check, trusted client IP, and one atomic D1 statement
+  (`recovery_requests`) enforcing 1/address/60s, 5/address/hour, and
+  10/IP/10min rolling windows; the uniform acknowledgement is sent before any
+  lookup, and the eligibility → native 30-minute token → send job runs in
+  `ctx.waitUntil`. Native `POST /api/auth/reset-password` remains the only
+  consume path (single use, session revocation, no auto-login) and now expires
+  the requester's own session cookies on success, forcing a fresh sign-in while
+  other pre-reset sessions keep the documented <=300s cache window; seven-day
+  admin links share it unchanged. Invite and admin-link responses now include
+  `invite` and an `email` outcome (`accepted | failed | unknown |
+  not_configured`, `messageId?`); a failed/unknown submission preserves the
+  authoritative link and is never replayed. The root/staging Wrangler configs,
+  installer (`--email-from` / `LXK_EMAIL_FROM`), and `lx worker upgrade` carry
+  and preserve the binding + sender. Email Sending is Beta and acceptance is
+  not inbox delivery: actual quota, SPF/DKIM/DMARC, and Gmail/Outlook receipt
+  are manual rollout checks, and local `wrangler dev` only simulates sends.
+
+
 ## [2026.13.0] - 2026-10-28
 
 ### Added

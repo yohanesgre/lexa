@@ -79,7 +79,9 @@ account prompt and disambiguates a multi-account token), `--cf-token <token>`
 (workers custom domain; skips the prompt), `--secrets-file <path>` (optional
 secrets applied at install; see below), `--reset-db` (drop the existing D1
 database and start migrations fresh — data is lost), `--from-repo <dir>`
-(install from a local checkout), `--yes`.
+(install from a local checkout), `--yes`. Transactional email is configured with
+`--email-from <verified-sender>` or the `LXK_EMAIL_FROM` environment variable; a
+re-run without either keeps the sender recorded in the previous deploy config.
 
 ### Cloudflare Workers target
 
@@ -108,6 +110,23 @@ database and start migrations fresh — data is lost), `--from-repo <dir>`
   0600 file on stdin — never argv, never stdout.
 - No tunnel, no VPS: the Worker route (custom domain or workers.dev) is the
   public entry. See `docs/CLOUDFLARE_WORKERS.md` for runtime details.
+- **Transactional email (optional, Cloudflare Email Sending Beta):** the
+  Worker declares the native `send_email` binding (`EMAIL`) and uses
+  `LXK_EMAIL_FROM` as the bare verified-domain sender. Both are required; the
+  canonical `LXK_PUBLIC_URL` must be HTTPS outside `LXK_ENV=dev`. Onboard the
+  sender domain in Cloudflare Email Sending and review SPF/DKIM/DMARC first —
+  do not enable inbound Email Routing or replace MX records. The generated
+  per-deploy config carries the binding and the sender (`--email-from` /
+  `LXK_EMAIL_FROM`); later re-runs and `lx worker upgrade` preserve the sender
+  var and the binding. Absent/partial configuration is safe: email stays off,
+  `GET /api/capabilities` reports `passwordRecovery: false`, admin/invite links
+  remain manual, and a boot warning identifies the partial config.
+  Acceptance means Cloudflare accepted the message, not inbox delivery;
+  temporary bounces are retried by Cloudflare, not by Lexa. A definite provider
+  rejection reports `failed`, an unconfirmed deadline/exception reports
+  `unknown`, and neither is automatically retried. Keep the actual quota,
+  sender-domain authentication and Gmail/Outlook receipt as manual rollout
+  checks against a controlled recipient.
 - **Zero-file alternative (DRAFT-UNVERIFIED):** Deploy Button (one click,
   no CLI — see below) or manual dashboard clicks
   (`docs/DEPLOYMENT_DASHBOARD.md`). Same bindings, same migrations,
@@ -152,8 +171,9 @@ bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local
   migration plus `LXK_CHAT_SUPERVISOR=1`; the flag is off unless explicitly
   opted in. This binding/class migration does not modify D1 tables or journals.
   Fill `<ACCOUNT_ID>` (multi-account tokens only),
-  `<D1_DATABASE_ID>`, `<KV_NAMESPACE_ID>`, and `<PUBLIC_URL>` in the copied
-  file.
+  `<D1_DATABASE_ID>`, `<KV_NAMESPACE_ID>`, `<PUBLIC_URL>`, and
+  `<VERIFIED_SENDER_EMAIL>` (or delete `vars.LXK_EMAIL_FROM` and the
+  `send_email` block to keep email disabled).
 - `LXK_SECRETS_MASTER_KEY` is **required** — Better Auth's session-signing
   secret derives from it (see the variable table) — mint it as base64 of exactly
   32 bytes (`openssl rand -base64 32`). Configure GitHub sync in the web app
@@ -338,6 +358,7 @@ boot and never overwrites a variable already set in the real environment.
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_SECRETS_MASTER_KEY` | **required** — the server fails closed without it: Better Auth's session-signing secret is derived from it (`lexa-better-auth:<key>`), so a missing key throws at auth construction with a `bun run setup` hint. It is also **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart — managed-secret rows stay readable through the PREV slot (no outage, no rewrap step), but **all sessions are invalidated** (the session-signing secret derives from the active key, so users sign in again). Remove PREV once every row is re-entered. |
 | `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
+| `LXK_EMAIL_FROM` | Workers only — bare verified-domain sender address for the native `EMAIL` (`send_email`) binding (Cloudflare Email Sending, Beta). Installer `--email-from` / `LXK_EMAIL_FROM` writes it into the deploy config and preserves it on re-runs/upgrades; unset/invalid disables email delivery (`passwordRecovery: false`) while manual admin links keep working. Domain onboarding, SPF/DKIM/DMARC and inbox placement are operator verification, not app claims |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`, and the source of `GET /api/capabilities` `mcpUrl` (this origin + `/mcp`) plus the `/mcp` Origin allow-list; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
 | `LXK_TRUSTED_PROXY_CIDRS` | **Bun/dev-only — inert on Workers**, which has no socket peer and trusts the edge's `cf-connecting-ip` as-is. Comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when a reverse proxy connects from this host. Set it when the proxy is a separate host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
@@ -366,8 +387,11 @@ base URL + cookie domain for the local flow). See the repository README.
 **Superadmin account:** after install, open `<url>/setup` once — the wizard
 creates the first superadmin (free-choice email + password; the password is
 never passed as a shell flag or env var). Members are onboarded via
-superadmin-issued workspace invite links (7d expiry) and set-password links —
-no email transport anywhere.
+superadmin-issued workspace invite links (7d expiry) and set-password links.
+When Cloudflare email delivery is configured, those actions also submit one
+message; the returned link always remains available for manual handoff. With
+email unconfigured, links stay copy-only and the login page directs recovery to
+an administrator.
 
 **Verify:**
 

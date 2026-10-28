@@ -50,6 +50,12 @@ function makeService(db: Database) {
 }
 
 describe("WorkspaceInvitesService", () => {
+  beforeEach(() => {
+    // The password-link suite below sets a different process-env origin once
+    // per file; this suite asserts the canonical dev fallback.
+    process.env.LXK_PUBLIC_URL = "http://localhost:5173";
+  });
+
   it("creates an invite with a 7d expiry and a link carrying the token", async () => {
     const svc = makeService(db);
     const { invite, link } = await Effect.runPromise(svc.create("New.User@Lexa.Dev", null));
@@ -130,6 +136,10 @@ afterAll(() => {
 });
 
 describe("PasswordLinksService", () => {
+  beforeEach(() => {
+    process.env.LXK_PUBLIC_URL = "http://localhost:3000";
+  });
+
   it("issues a set-password link (verification row, 7d expiry) and the native reset consumes it once", async () => {
     // The static WorkspaceInvitesService import above already evaluated
     // ../auth with the default PUBLIC_URL (5173); reset the registry so this
@@ -166,6 +176,14 @@ describe("PasswordLinksService", () => {
       }));
     const first = await consume({ token, newPassword: "brandnew123" });
     expect(first.status).toBe(200);
+    // Successful reset expires the requester's own signed session cookies in
+    // the same response (native deletes DB sessions; the hook clears cookies),
+    // so the next browser state is signed out without touching other sessions.
+    const cleared = first.headers.getSetCookie();
+    const expiredCookie = (name: string) =>
+      cleared.some((c) => c.startsWith(`${name}=`) && /max-age=0/i.test(c));
+    expect(expiredCookie("better-auth.session_token")).toBe(true);
+    expect(expiredCookie("better-auth.session_data")).toBe(true);
 
     const signIn = await auth.api.signInEmail({ body: { email: "legacy@lexa.dev", password: "brandnew123" } });
     expect(signIn.user.email).toBe("legacy@lexa.dev");

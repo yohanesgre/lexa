@@ -302,6 +302,52 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   The assistant exists on Bun and Workers alike — no external runner to host;
   outbound subrequest budget 50/request free, 1000 paid.
 
+### Transactional email (`EMAIL`)
+
+Native Cloudflare Email Sending only (Beta, Workers Paid). The Worker declares
+`send_email: [{ name: "EMAIL" }]` in its Wrangler config; `LXK_EMAIL_FROM` is
+the bare verified-domain sender. No SMTP, provider registry, Bun transport,
+API token, queue, outbox, retry loop, delivery table, or send-history UI.
+`GET /api/capabilities` exposes only `passwordRecovery: boolean` — true when the
+binding, a valid sender, and an HTTPS canonical origin are all present
+(`http://localhost:5173` allowed when `LXK_ENV=dev`). No sender, binding,
+quota, or account detail is public.
+
+Three fixed templates (self-service reset, workspace invitation, admin
+set-password) render text + escaped HTML with one link built from
+`LXK_PUBLIC_URL` and the issued row's own expiry. Recipient-specific links stay
+in message bodies; logs carry only outcome/category.
+
+- **Self-service recovery.** `POST /api/auth/request-password-reset` is wrapped
+  above the native handler in `server/workers-entry.ts` /
+  `server/auth-recovery.ts`: body cap/parse, Origin check, strict rolling D1
+  admission (`recovery_requests`), then the uniform 200. The entire
+  eligibility → native `auth.api.requestPasswordReset` (30-minute single-use
+  token) → send job rides this request's `ctx.waitUntil`, so provider latency
+  never touches the response. Unknown, banned, and pending-invite addresses
+  create no token and send nothing. A direct native HTTP call hits this wrapper,
+  so it cannot bypass the limits.
+- **Admin/invite links.** Existing 7-day single-use tokens are unchanged. The
+  route returns the authoritative link/row plus `email: { status, messageId? }`
+  (`accepted | failed | unknown | not_configured`). A failed/unknown submission
+  never invalidates or recreates the link; the admin still copies it manually.
+- **Consume.** Native `POST /api/auth/reset-password` is the only consume path
+  for both token kinds: single use, expiry, password policy, session revocation,
+  no auto-login, no role/reactivation change. The signed session cookie cache can
+  keep ordinary authorization up to 300s stale; sensitive routes and Lexa admin
+  gates re-read D1.
+
+**Deployment custody.** The root config, staging template, installer
+(`scripts/lib/cf-deploy.ts`), and `lx worker upgrade` carry the binding;
+`--email-from` / `LXK_EMAIL_FROM` writes the sender and later re-runs/upgrades
+preserve it. A boot warning reports a partial config. Local `wrangler dev`
+simulates the binding: sends are logged, not delivered, so local success is
+**not** delivery evidence. Real sender-domain onboarding, SPF/DKIM/DMARC,
+account quota, and controlled Gmail/Outlook receipt are manual rollout checks —
+never inferred from a local run. Accepted submission is not guaranteed inbox
+delivery; Cloudflare retries temporary bounces, Lexa never replays an uncertain
+send.
+
 ### Inbound MCP (`/mcp`)
 
 The same Worker fetch handler (`server/workers-entry.ts`) serves the inbound

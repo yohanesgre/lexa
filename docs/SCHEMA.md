@@ -86,8 +86,8 @@ CREATE TABLE user_project_roles (
 -- Better Auth tables (auth-roles-teams) — library-owned shapes
 -- ============================================================
 -- Email/password sessions, accounts, and verification tokens (set-password
--- links, invite acceptance). Timestamps are TEXT — the kysely adapter
--- serializes Date as ISO 8601 strings (spike-verified), unlike Lexa's
+-- links, invite acceptance, password reset). Timestamps are TEXT — the kysely
+-- adapter serializes Date as ISO 8601 strings (spike-verified), unlike Lexa's
 -- TEXT datetime('now') conventions.
 -- No social providers: account.providerId is always 'credential'.
 CREATE TABLE session (
@@ -123,9 +123,9 @@ CREATE INDEX account_userId_idx ON account(userId);
 
 CREATE TABLE verification (
   id          TEXT PRIMARY KEY,
-  identifier  TEXT NOT NULL,                                  -- set-password / invite token id
-  value       TEXT NOT NULL,                                  -- the secret value
-  expiresAt   TEXT NOT NULL,                                  -- ISO 8601; 7d
+  identifier  TEXT NOT NULL,                                  -- token id: 'reset-password:<token>' for password links and self-service recovery
+  value       TEXT NOT NULL,                                  -- the secret value (user id)
+  expiresAt   TEXT NOT NULL,                                  -- ISO 8601; 7d admin links, 30m self-service reset tokens
   createdAt   TEXT NOT NULL,
   updatedAt   TEXT NOT NULL
 );
@@ -177,9 +177,11 @@ CREATE INDEX invitation_email_idx ON invitation(email);
 -- ============================================================
 -- Workspace invitations (superadmin-issued app-member invites)
 -- ============================================================
--- Link-based (no email transport): token = link secret, expires 7d after
--- issue, revocable while pending. Accepted on first login — the invitee
--- sets their own password → member account created → accepted_at stamped.
+-- Link-based: token = link secret, expires 7d after issue, revocable while
+-- pending. Creation also attempts one Cloudflare email when configured; a
+-- failed send never invalidates the row or the returned link. Accepted on
+-- first login — the invitee sets their own password → member account created →
+-- accepted_at stamped.
 -- Lexa conventions (TEXT datetime('now')) — unlike the Better Auth tables.
 CREATE TABLE workspace_invitations (
   id          TEXT PRIMARY KEY,
@@ -191,6 +193,27 @@ CREATE TABLE workspace_invitations (
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   accepted_at TEXT                                           -- NULL = pending
 );
+
+-- ============================================================
+-- Self-service recovery admission (Workers)
+-- ============================================================
+-- Operational throttle ledger for password-reset requests. One conditional
+-- INSERT admits a request only when ALL rolling windows pass atomically:
+-- 1/address/60s, 5/address/hour, 10/IP/10min. Unknown/banned/pending-invite
+-- addresses are counted identically (the rows precede any account lookup).
+-- Only accepted requests get a row. Subjects are SHA-256 hex of the
+-- normalized address / resolved client IP; no plaintext address, body, token
+-- or delivery outcome is stored. `requested_at` is epoch seconds; the Worker
+-- maintenance tick deletes rows at or past the longest window (1h).
+CREATE TABLE recovery_requests (
+  id           TEXT PRIMARY KEY,
+  address_hash TEXT NOT NULL,
+  ip_hash      TEXT NOT NULL,
+  requested_at INTEGER NOT NULL
+);
+CREATE INDEX recovery_requests_address_time_idx ON recovery_requests(address_hash, requested_at);
+CREATE INDEX recovery_requests_ip_time_idx ON recovery_requests(ip_hash, requested_at);
+CREATE INDEX recovery_requests_time_idx ON recovery_requests(requested_at);
 
 -- ============================================================
 -- Kanban Columns

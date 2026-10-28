@@ -489,7 +489,7 @@ GET    /api/health
 GET    /api/capabilities
 → 200 { assistant: boolean, flavor: "bun" | "workers",
         chatAttachments: boolean, tasksBulk: boolean,
-        mcpUrl: string }
+        mcpUrl: string, passwordRecovery: boolean }
   API-key exempt. Flavor + capability discovery (ADR-0003 §F.2, revised by
   ADR-0005 D7), served before boot on both flavors, no DB read, no leak.
   `mcpUrl` is the canonical inbound MCP endpoint (see Inbound MCP server):
@@ -504,6 +504,12 @@ GET    /api/capabilities
   `assistant && !LXK_DISABLE_CHAT_ATTACHMENTS`; `tasksBulk` is
   `!LXK_DISABLE_TASKS_BULK` (flavor-independent). The frontend gates assistant
   surfaces on these flags; the server refuses regardless.
+  `passwordRecovery` is `true` only on Workers with the native `EMAIL`
+  (`send_email`) binding, a valid bare-address `LXK_EMAIL_FROM`, and an
+  `https://` `LXK_PUBLIC_URL` (`http://localhost:5173` is accepted with
+  `LXK_ENV=dev`). It is the only public recovery signal; sender address,
+  binding, quota and account existence are never exposed. `false` keeps the
+  manual admin-link and contact-admin paths.
 
 GET    /api/setup/status
 → 200 { configured: boolean, needsAdmin: boolean,
@@ -1487,10 +1493,18 @@ DELETE /api/workspace/members/:userId   (superadmin)
 
 POST   /api/workspace/invites    (superadmin)
 body { email* }
-→ 201 { link } | 403 FORBIDDEN | 409 (invite already pending for that email)
-  link = {baseURL}/invite?token=<secret> — shared out-of-band (no email
-  transport). Expires 7d after issue. Accepting on first login sets the
-  password → member account created → accepted_at stamped; re-use idempotent.
+→ 201 { link, invite, email } | 403 FORBIDDEN | 409 INVITE_PENDING
+  link = {baseURL}/invite?token=<secret>. `invite` is the authoritative
+  persisted row: { id, email (normalized), tokenHint (first 8 chars of the
+  token), expiresAt (ISO 8601, 7d after issue), acceptedAt: null }.
+  `email` is { status: "accepted" | "failed" | "unknown" | "not_configured",
+  messageId? } (see Email delivery outcomes). Link creation and email
+  submission are separate outcomes: a failed/unknown/not-configured send
+  still returns the valid persisted link and invitation row; the route never
+  replays creation. Accepting on first login sets the password → member
+  account created → accepted_at stamped. A used/accepted token is rejected
+  (INVALID_TOKEN, see peek/accept below) — reuse is NOT idempotent. Revocation,
+  single use, expiry, and duplicate-pending conflict are unchanged.
 
 POST   /api/auth/invite/accept    (keyless, session-less — the token is the auth)
 body { token*, name*, password* }    (password min 8 chars)
@@ -1521,9 +1535,94 @@ DELETE /api/workspace/invites/:inviteId   (superadmin; pending only)
   Revoked links die.
 
 POST   /api/workspace/members/:userId/set-password-link   (superadmin)
-→ 201 { link } | 403 FORBIDDEN | 404 USER_NOT_FOUND
+→ 201 { link, email } | 403 FORBIDDEN | 404 USER_NOT_FOUND
   link = {baseURL}/set-password?token=<secret> — verification table token,
-  single-use, 7d expiry. Covers forgotten/no passwords (legacy users).
+  single-use, 7d expiry. Covers forgotten/no passwords (legacy users). The
+  recipient is the stored `users.email`; the caller cannot supply one. `email`
+  uses the Email delivery outcomes shape; failed/unknown/not-configured still
+  returns the issued link, and the token is never re-issued or replayed.
+```
+
+### Email delivery outcomes
+
+Both admin email-capable endpoints return the same outcome object:
+
+```
+{ status: "accepted" | "failed" | "unknown" | "not_configured", messageId?: string }
+```
+
+- `accepted` — Cloudflare accepted the message for delivery (`messageId`
+  present when the provider returned one). Accepted is NOT inbox delivery.
+- `failed` — definite provider rejection (validation, unverified sender,
+  suppression, quota/rate/suspension). The link remains valid for manual
+  handoff.
+- `unknown` — the send deadline/exception could not establish acceptance.
+  Never automatically retried; do not retry the creating operation — only a
+  new explicit request may send again.
+- `not_configured` — no `EMAIL` binding or no valid `LXK_EMAIL_FROM`; no send
+  was attempted.
+
+No delivery history, outbox, queue, or replay is added. Recipient addresses,
+token-bearing links, bodies and raw provider payloads never enter logs.
+
+### Self-service password recovery (Workers)
+
+```
+POST   /api/auth/request-password-reset    (keyless; Workers only)
+body { email* }        (JSON only; no redirect/recipient/sender/template overrides)
+→ 200 { status: true,
+        message: "If an active account exists for this email, you’ll receive a password reset link." }
+  | 400 { error: { code: "INVALID_INPUT" | "RESET_PASSWORD_DISABLED" } }
+  | 403 { error: { code: "FORBIDDEN" } }        (disallowed Origin)
+  | 413 { error: { code: "BODY_TOO_LARGE" } }
+  | 429 { error: { code: "RATE_LIMITED" } } + Retry-After
+  | 500 { error: { code: "INTERNAL" } }        (admission store unavailable; sanitized)
+
+  The 200 is returned before any recipient lookup or provider wait, and is
+  identical for unknown, banned, pending-invite, ineligible, and
+  provider-failed requests. `RESET_PASSWORD_DISABLED` means recovery is not
+  configured (no binding/sender/HTTPS origin). A disallowed `Origin` header
+  (when present) is rejected and never bypasses the native protections.
+
+  Sequence: existing `/api/auth/*` per-IP throttle + request body cap → parse →
+  capability/Origin check → strict rolling admission (`recovery_requests`) →
+  uniform 200 with the issuance+send job attached to the request's
+  `ctx.waitUntil` → re-check active account →
+  Better Auth `requestPasswordReset` (30-minute single-use verification token)
+  → fixed email template from `LXK_PUBLIC_URL` → native `EMAIL` send. Unknown,
+  banned, and pending-invite addresses create no token and send nothing.
+
+  Admission (all conditions in one conditional `INSERT`, atomic across Worker
+  instances): 1 accepted request per normalized address per 60s, 5 per address
+  per rolling hour, 10 per resolved client IP per rolling 10 minutes. Rejected
+  attempts are not recorded. Only SHA-256 hashes of the normalized address and
+  client IP are stored with epoch-second timestamps; the maintenance tick
+  purges rows past the longest window. A D1 admission failure returns the
+  generic 500 `INTERNAL` (sanitized, same for every account state) — never a
+  fabricated 429 throttling state.
+
+  When recovery is configured, the better-auth router path
+  `/request-password-reset` is also disabled (`disabledPaths`), so every
+  alternate native HTTP variant (including normalized trailing slashes) fails
+  closed; the wrapper's internal `auth.api.requestPasswordReset` remains the
+  sole issuer. The wrapper owns the canonical POST path.
+
+  Completion stays the native keyless consume:
+```
+
+```
+POST   /api/auth/reset-password
+body { token*, newPassword* }
+→ 200 { status: true } | 400 INVALID_TOKEN / PASSWORD_TOO_SHORT / PASSWORD_TOO_LONG
+  Single use; expired/used/revoked tokens reject. A successful reset changes
+  only the token's account, revokes existing sessions through the canonical
+  auth policy, expires the requester's own `better-auth.session_token` /
+  `session_data` cookies in that response, never logs in automatically, never
+  reactivates a banned account, and never changes roles. GET/mail-scanner
+  visits do not consume the token. Copied or other pre-reset sessions keep the
+  documented <=300s signed-cookie cache window; sensitive routes re-read D1.
+  The set-password form stays usable when a valid token is present even if the
+  browser holds a cached session.
 ```
 
 ### Sessions (self-service)

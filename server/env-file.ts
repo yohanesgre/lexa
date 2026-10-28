@@ -55,6 +55,7 @@ export const ENV_SECTION_ORDER = [
   "core",
   "auth",
   "urls",
+  "email",
   "storage",
   "limits",
   "features",
@@ -73,6 +74,7 @@ function section(keys: readonly string[], name: string): void {
 section(["DATABASE_PATH", "PORT"], "core");
 section(["LXK_ADMIN_EMAILS"], "auth");
 section(["LXK_ENV", "LXK_PUBLIC_URL", "LXK_TRUSTED_ORIGINS", "LXK_TRUSTED_PROXY_CIDRS"], "urls");
+section(["LXK_EMAIL_FROM"], "email");
 section(
   [
     "LXK_STORAGE_DRIVER",

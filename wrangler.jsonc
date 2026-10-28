@@ -13,6 +13,16 @@
 	"ai": {
 		"binding": "AI"
 	},
+	// Native Cloudflare Email Sending (Workers Paid, Beta). The binding only
+	// supplies the sending capability; delivery also needs a bare verified-
+	// domain sender in the LXK_EMAIL_FROM var. Neither the binding nor a
+	// missing/invalid sender is ever exposed publicly: GET /api/capabilities
+	// reports passwordRecovery=false and admin/invite links stay manual.
+	"send_email": [
+		{
+			"name": "EMAIL"
+		}
+	],
 	// Raw from-source bundling. `main` points at source
 	// (server/workers-entry.ts), so a `wrangler deploy` that resolves this
 	// root `main` with no Vite build output bundles from source and needs

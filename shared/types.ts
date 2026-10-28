@@ -54,9 +54,10 @@ export interface TeamMember {
   createdAt: string;
 }
 
-// Superadmin-issued app-member invite (link-based, no email transport).
-// tokenHint = short prefix of the link secret for display; the full token is
-// never stored in the payload.
+// Superadmin-issued app-member invite (link-based). Creation may also submit
+// one Cloudflare email when configured; the persisted invite + returned link
+// stay authoritative regardless of delivery outcome. tokenHint = short prefix
+// of the link secret for display; the full token is never stored in the payload.
 export interface WorkspaceInvite {
   id: ID;
   email: string;

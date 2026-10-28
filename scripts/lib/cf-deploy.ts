@@ -382,6 +382,9 @@ export interface RootWorkerConfig {
   observability?: Record<string, unknown>;
   triggers?: Record<string, unknown>;
   ai?: { binding: string; dev?: Record<string, unknown> };
+  // Native Email Sending binding declaration, carried verbatim into the
+  // per-deploy config. The sender stays a var (LXK_EMAIL_FROM).
+  send_email?: unknown;
 }
 
 // Remove // line comments and /* */ block comments while respecting string
@@ -541,10 +544,12 @@ export function readDeployVersion(dir: string): string | null {
 export function resolveDeployVars(input: {
   version: string | null;
   publicUrl: string;
+  emailFrom?: string;
 }): Record<string, string> {
   return {
     LXK_ENV: "production",
     ...(input.publicUrl ? { LXK_PUBLIC_URL: input.publicUrl } : {}),
+    ...(input.emailFrom ? { LXK_EMAIL_FROM: input.emailFrom } : {}),
     ...(input.version ? { LXK_VERSION: input.version } : {}),
   };
 }
@@ -870,6 +875,7 @@ export interface DeployConfigInput {
   kvId: string;
   publicUrl: string;
   version: string | null;
+  emailFrom?: string;
   manifest: {
     main?: string;
     assets?: { directory?: string };
@@ -930,6 +936,7 @@ export function buildDeployConfig(
       ...resolveDeployVars({
         version: input.version,
         publicUrl: input.publicUrl,
+        ...(input.emailFrom ? { emailFrom: input.emailFrom } : {}),
       }),
     },
     d1_databases: [
@@ -944,6 +951,7 @@ export function buildDeployConfig(
     durable_objects: chatSupervisorDurableObjects(),
     migrations,
     ai: rootConfig.ai ?? { binding: "AI" },
+    ...(rootConfig.send_email !== undefined ? { send_email: rootConfig.send_email } : {}),
     // Scheduled tick carried verbatim from root (prune + R2 backup retention).
     ...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {}),
     observability: resolveObservability(rootConfig),
@@ -960,6 +968,10 @@ export async function main(): Promise<void> {
   // before creating a fresh one (all data in it is gone).
   const RESET_DB = process.argv.includes("--reset-db");
   const NAME = flag("name") || "lexa";
+  // Optional transactional sender. A re-run without the flag keeps the prior
+  // deploy config's LXK_EMAIL_FROM (operator vars are preserved); passing it
+  // again updates the same var. No sender is invented.
+  const EMAIL_FROM = flag("email-from") || process.env.LXK_EMAIL_FROM || "";
   const FLAVOR = resolveNames(NAME);
   const FLAVOR_NAME = NAME;
   if (NAME === "staging" || NAME === "prod") {
@@ -1108,6 +1120,7 @@ export async function main(): Promise<void> {
       kvId,
       publicUrl,
       version: readDeployVersion(DIR),
+      ...(EMAIL_FROM ? { emailFrom: EMAIL_FROM } : {}),
       manifest,
       rootConfig,
       priorConfig,
