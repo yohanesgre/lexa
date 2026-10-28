@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, FileText, Image as ImageIcon, Paperclip, Send, Square, XCircle } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, FileText, Image as ImageIcon, Paperclip, Send, Square, XCircle } from "lucide-react";
 import {
   CHAT_ATTACHMENT_CAPS,
   DOCUMENT_ACCEPT,
@@ -488,6 +488,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   suspendCount,
   attachDisabled,
   attachmentsEnabled = true,
+  collapsible = false,
   sendError,
   onSend,
   onAbort,
@@ -516,6 +517,9 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   attachDisabled: boolean;
   // Kill switch: false hides the attach control entirely.
   attachmentsEnabled?: boolean | undefined;
+  // Mobile-only fold control: the deck can fold to a one-row bar so the
+  // transcript keeps the space the rail, textarea, and footer would take.
+  collapsible?: boolean | undefined;
   // Terminal stream error (carries `details` for extraction failures).
   sendError?: { code: string; details?: unknown } | null | undefined;
   onSend: (message: string, attachments: ChatAttachmentRef[]) => boolean;
@@ -538,6 +542,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const [rejections, setRejections] = useState<ComposerRejection[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
   const [queueWarning, setQueueWarning] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const mention = useMentionTokens({ slug, value: draft, onChange: setDraft, skills });
   // Combobox wiring: the textarea owns focus, the popup is its listbox, and the
@@ -552,8 +557,16 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const mentionListboxId = useId();
   const mentionActiveDescendant =
     mention.open && mention.items.length > 0 ? `${mentionListboxId}-opt-${mention.focusedIndex}` : undefined;
+  const deckBodyId = useId();
   const queueMode = streaming || suspendedLock;
+  const isCollapsed = collapsible && collapsed;
   const elapsed = useElapsedSeconds(streaming);
+  const streamingText =
+    streamStatus === "connecting"
+      ? hasIngress
+        ? "Reconnecting to the current reply…"
+        : "Connecting to Assistant…"
+      : "Assistant is replying…";
   const uploadsRef = useRef<Map<string, { abort: () => void }>>(new Map());
   const sentIdsRef = useRef<string[]>([]);
   // The attachment objects that rode the accepted send. The chips clear
@@ -883,6 +896,33 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   return (
     <div className="chat-deck" style={{ position: "relative" }}>
+      {isCollapsed && (
+        <div className="deck-collapsed">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm deck-expand"
+            aria-expanded={false}
+            aria-controls={deckBodyId}
+            onClick={() => setCollapsed(false)}
+          >
+            <ChevronUp size={12} strokeWidth={1.5} aria-hidden="true" />
+            <span className="truncate">Message Assistant</span>
+          </button>
+          {streaming && (
+            <>
+              <span className="deck-status" role="status">
+                <span aria-hidden="true" style={STATUS_DOT_STYLE} />
+                <span className="truncate">{streamingText}</span>
+              </span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onAbort}>
+                <Square size={12} strokeWidth={1.5} fill="currentColor" />
+                Stop
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      <div id={deckBodyId} hidden={isCollapsed}>
       {mention.open && (
         <ComposerMentionPopup
           mention={mention}
@@ -891,9 +931,21 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
           listboxId={mentionListboxId}
         />
       )}
-      {rail && (
-        <div className="deck-rail" style={busy409 || queueMode ? { opacity: 0.55 } : undefined}>
+      {(rail || collapsible) && (
+        <div className={`deck-rail${busy409 || queueMode ? " is-locked" : ""}`}>
           {rail}
+          {collapsible && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon-sm deck-collapse"
+              aria-label="Collapse composer"
+              aria-expanded={true}
+              aria-controls={deckBodyId}
+              onClick={() => setCollapsed(true)}
+            >
+              <ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" />
+            </button>
+          )}
         </div>
       )}
       {railHint}
@@ -997,7 +1049,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
               <span aria-hidden="true" style={STATUS_DOT_STYLE} />
               {streaming ? (
                 <>
-                  {streamStatus === "connecting" ? hasIngress ? "Reconnecting to the current reply…" : "Connecting to Assistant…" : "Assistant is replying…"}
+                  {streamingText}
                   <span aria-hidden="true"> · {mmss(elapsed)}</span>
                 </>
               ) : (
@@ -1048,6 +1100,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
             </button>
           </>
         )}
+      </div>
       </div>
     </div>
   );

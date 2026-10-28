@@ -8951,6 +8951,28 @@
   background: var(--lx-bg-accent-subtle);
 }
 .deck-rail-spacer { margin-left: auto; }
+/* Rail lock (busy-409 / queue mode): the pickers are disabled, but the
+   composer fold stays live — it is not a rail setting. */
+.deck-rail.is-locked > :not(.deck-collapse) { opacity: 0.55; }
+.deck-collapse { margin-left: auto; }
+/* Folded mobile deck — the card keeps its frame and becomes one bar, so the
+   transcript keeps the height the rail, textarea, and footer would take.
+   Only rendered below 768px (the fold control is mobile-only). */
+.deck-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+}
+.deck-collapsed .deck-expand {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+}
+.deck-collapsed .deck-status {
+  min-width: 0;
+  overflow: hidden;
+}
 .deck-rail--borderless { border-bottom: none; }
 .deck-message { min-width: 0; }
 /* The app's .composer-editor carries a 64px min-height for the document

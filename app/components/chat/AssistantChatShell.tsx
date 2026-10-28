@@ -509,6 +509,7 @@ export function ChatComposerArea({
           suspendCount={suspendCount}
           attachDisabled={attachDisabled}
           attachmentsEnabled={attachmentsEnabled}
+          collapsible={isMobileComposer && !landing}
           sendError={sendError}
           hasIngress={hasIngress}
           onSend={onSend}
