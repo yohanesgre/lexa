@@ -48,6 +48,9 @@ const ERROR_ROW_STYLE: React.CSSProperties = {
   background: "var(--lx-bg-danger-subtle)",
 };
 const ERROR_TEXT_STYLE: React.CSSProperties = { fontSize: 12, lineHeight: "16px", color: "var(--lx-text-danger)", flex: 1, minWidth: 0 };
+// Stop reads as destructive in both the footer and the folded bar; the folded
+// copy was a neutral ghost, so the two states looked like different actions.
+const STOP_GHOST_STYLE: React.CSSProperties = { borderColor: "var(--lx-bg-danger-subtle)", color: "var(--lx-text-danger)" };
 // One held message per thread; a second Queue press would silently replace it.
 const QUEUE_TAKEN_MESSAGE = "A message is already queued — send or cancel it before queueing another.";
 
@@ -560,6 +563,17 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const deckBodyId = useId();
   const queueMode = streaming || suspendedLock;
   const isCollapsed = collapsible && collapsed;
+  // Folding hides the element that had focus (and the fold control itself);
+  // expanding unmounts the bar. Move focus to the control that replaced the
+  // vanished one, so keyboard users are never dropped on <body>.
+  const expandRef = useRef<HTMLButtonElement>(null);
+  const collapseRef = useRef<HTMLButtonElement>(null);
+  const wasCollapsedRef = useRef(isCollapsed);
+  useEffect(() => {
+    if (wasCollapsedRef.current === isCollapsed) return;
+    wasCollapsedRef.current = isCollapsed;
+    (isCollapsed ? expandRef : collapseRef).current?.focus();
+  }, [isCollapsed]);
   const elapsed = useElapsedSeconds(streaming);
   const streamingText =
     streamStatus === "connecting"
@@ -887,6 +901,33 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   const canSend = draft.trim().length > 0 && !streaming && !suspendedLock && allAttachmentsReady;
   const canQueue = draft.trim().length > 0 && !busy409 && allAttachmentsReady;
+  // The folded bar must not swallow an urgent state behind the fold: a refused
+  // send, a held/queued message, or an attachment problem gets one compact
+  // label that expands the deck (never a duplicate of the full controls).
+  const failedAttachmentCount = attachments.filter(
+    (a) => a.status === "failed" || a.status === "extraction-failed" || (a.status === "ready" && !a.storageKey)
+  ).length;
+  const foldedNotice = !isCollapsed
+    ? null
+    : busy409
+      ? "REQUEST NOT ACCEPTED"
+      : suspendedLock
+        ? "TURN SUSPENDED"
+        : queued?.heldReason === "stopped"
+          ? "HELD — TURN STOPPED"
+          : queued?.heldReason === "failed"
+            ? "HELD — TURN FAILED"
+            : queued
+              ? "1 QUEUED"
+              : queueWarning
+                ? "QUEUE WARNING"
+                : rejections.length > 0
+                  ? "ATTACHMENT REJECTED"
+                  : failedAttachmentCount > 0
+                    ? "ATTACHMENT ERROR"
+                    : warning
+                      ? "ATTACHMENT LIMIT"
+                      : null;
 
   const placeholder = busy409
     ? "Waiting for the current reply…"
@@ -899,6 +940,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
       {isCollapsed && (
         <div className="deck-collapsed">
           <button
+            ref={expandRef}
             type="button"
             className="btn btn-ghost btn-sm deck-expand"
             aria-expanded={false}
@@ -908,13 +950,25 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
             <ChevronUp size={12} strokeWidth={1.5} aria-hidden="true" />
             <span className="truncate">Message Assistant</span>
           </button>
+          {foldedNotice && (
+            <button
+              type="button"
+              className="deck-chip"
+              aria-label={`Expand composer — ${foldedNotice}`}
+              onClick={() => setCollapsed(false)}
+              style={{ borderColor: "var(--lx-bg-danger-subtle)", color: "var(--lx-text-danger)", minWidth: 0 }}
+            >
+              <AlertCircle size={12} strokeWidth={1.5} aria-hidden="true" style={{ flexShrink: 0 }} />
+              <span className="truncate">{foldedNotice}</span>
+            </button>
+          )}
           {streaming && (
             <>
               <span className="deck-status" role="status">
                 <span aria-hidden="true" style={STATUS_DOT_STYLE} />
                 <span className="truncate">{streamingText}</span>
               </span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={onAbort}>
+              <button type="button" className="btn btn-ghost btn-sm" style={STOP_GHOST_STYLE} onClick={onAbort}>
                 <Square size={12} strokeWidth={1.5} fill="currentColor" />
                 Stop
               </button>
@@ -936,6 +990,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
           {rail}
           {collapsible && (
             <button
+              ref={collapseRef}
               type="button"
               className="btn btn-ghost btn-icon-sm deck-collapse"
               aria-label="Collapse composer"
@@ -1066,7 +1121,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  style={{ borderColor: "var(--lx-bg-danger-subtle)", color: "var(--lx-text-danger)" }}
+                  style={STOP_GHOST_STYLE}
                   onClick={onAbort}
                 >
                   <Square size={12} strokeWidth={1.5} fill="currentColor" />

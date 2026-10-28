@@ -8955,6 +8955,13 @@
    composer fold stays live — it is not a rail setting. */
 .deck-rail.is-locked > :not(.deck-collapse) { opacity: 0.55; }
 .deck-collapse { margin-left: auto; }
+/* The mobile rail (below 768px, same breakpoint as `collapsible`) already ends
+   with a spacer right before the fold control; two auto margins split the free
+   space and float the fold control mid-row. Keep the spacer for the desktop
+   rail and let the fold control own the gap. */
+@media (max-width: 767px) {
+  .deck-rail-spacer { margin-left: 0; }
+}
 /* Folded mobile deck — the card keeps its frame and becomes one bar, so the
    transcript keeps the height the rail, textarea, and footer would take.
    Only rendered below 768px (the fold control is mobile-only). */
