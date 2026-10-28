@@ -305,6 +305,60 @@ describe("inbound MCP tools", () => {
     expect((unchanged.structuredContent as { columnId: string }).columnId).toBe("c1");
   });
 
+  it("rejects dot-segment path arguments without mutating the target", async () => {
+    const projectBefore = await callTool(ADMIN_KEY, "lexa_get_project", { projectSlug: "p1" });
+    const before = projectBefore.structuredContent as { description: string; name: string };
+    const taskBefore = await callTool(ADMIN_KEY, "lexa_get_task", { projectSlug: "p1", id: "EG-1" });
+    const titleBefore = (taskBefore.structuredContent as { title: string }).title;
+
+    // Literal and percent-encoded dot segments in every caller-controlled path
+    // argument must be refused before a Request is built: `..` would otherwise
+    // normalize a task/wiki route onto the project route and mutate it.
+    const taskAttempts: Array<[string, Record<string, unknown>]> = [
+      ["task id .", { projectSlug: "p1", id: ".", description: "traversal" }],
+      ["task id ..", { projectSlug: "p1", id: "..", description: "traversal" }],
+      ["task id %2e%2e", { projectSlug: "p1", id: "%2e%2e", description: "traversal" }],
+      ["project slug ..", { projectSlug: "..", id: "EG-1", description: "traversal" }],
+      ["project slug %2e.", { projectSlug: "%2e.", id: "EG-1", description: "traversal" }],
+    ];
+    for (const [label, args] of taskAttempts) {
+      const result = await callTool(ADMIN_KEY, "lexa_update_task", args);
+      expect(isToolError(result), label).toBe(true);
+      expect(result.structuredContent?.error).toMatchObject({ code: "INVALID_ARGS" });
+    }
+
+    const wikiAttempts: Array<[string, Record<string, unknown>]> = [
+      ["wiki page slug ..", { projectSlug: "p1", pageSlug: "..", content: "traversal" }],
+      ["wiki page slug %2e%2e", { projectSlug: "p1", pageSlug: "%2e%2e", content: "traversal" }],
+      ["wiki project slug ..", { projectSlug: "..", pageSlug: "smoke-page", content: "traversal" }],
+    ];
+    for (const [label, args] of wikiAttempts) {
+      const result = await callTool(ADMIN_KEY, "lexa_update_wiki_page", args);
+      expect(isToolError(result), label).toBe(true);
+      expect(result.structuredContent?.error).toMatchObject({ code: "INVALID_ARGS" });
+    }
+
+    const projectAfter = await callTool(ADMIN_KEY, "lexa_get_project", { projectSlug: "p1" });
+    const after = projectAfter.structuredContent as { description: string; name: string };
+    expect(after.description).toBe(before.description);
+    expect(after.name).toBe(before.name);
+    const taskAfter = await callTool(ADMIN_KEY, "lexa_get_task", { projectSlug: "p1", id: "EG-1" });
+    expect((taskAfter.structuredContent as { title: string }).title).toBe(titleBefore);
+  });
+
+  it("still serves ordinary task updates and reads", async () => {
+    const updated = await callTool(ADMIN_KEY, "lexa_update_task", {
+      projectSlug: "p1",
+      id: "EG-1",
+      title: "Renamed through MCP",
+    });
+    expect(isToolError(updated)).toBe(false);
+    expect((updated.structuredContent?.data as { title: string }).title).toBe("Renamed through MCP");
+
+    const fetched = await callTool(ADMIN_KEY, "lexa_get_task", { projectSlug: "p1", id: "EG-1" });
+    expect((fetched.structuredContent as { title: string }).title).toBe("Renamed through MCP");
+  });
+
   it("filters discovery and denies guessed projects for a member key", async () => {
     const list = await callTool(MEMBER1_KEY, "lexa_list_projects", {});
     expect((list.structuredContent as { data: Array<{ slug: string }> }).data.map((p) => p.slug)).toEqual(["p1"]);

@@ -7,7 +7,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { McpRestCall, McpRestDispatch } from "./rest";
+import { McpInvalidPathSegmentError, type McpRestCall, type McpRestDispatch } from "./rest";
 
 export const MCP_SERVER_INFO = { name: "lexa", version: "1.0.0" } as const;
 
@@ -104,7 +104,12 @@ async function invoke(dispatch: McpRestDispatch, call: McpRestCall, readOnly: bo
   let response: Response;
   try {
     response = await dispatch(call);
-  } catch {
+  } catch (error) {
+    // A rejected path segment never reaches the route stack; it is an invalid
+    // tool argument, not an uncertain write.
+    if (error instanceof McpInvalidPathSegmentError) {
+      return failure("INVALID_ARGS", `Invalid path segment ${JSON.stringify(error.segment)}.`);
+    }
     return failure(
       "INTERNAL",
       "The operation did not complete inside the server.",

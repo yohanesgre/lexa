@@ -33,6 +33,61 @@ export interface McpDispatchOptions {
   baseUrl: string;
 }
 
+// Path segments are the only caller-controlled URL structure a tool can emit.
+// `encodeURIComponent` leaves "." and ".." untouched, so `new URL` would
+// normalize them away and retarget the request at a sibling route (a task
+// `id: ".."` turned PATCH /projects/:slug/tasks/:id into PATCH /projects/:slug).
+// Every segment is therefore rejected before any Request is built when its
+// percent-decoded value is a dot segment or carries a separator/control
+// character. This dispatch is the single choke point every tool goes through.
+export class McpInvalidPathSegmentError extends Error {
+  constructor(readonly segment: string) {
+    super(`invalid path segment: ${JSON.stringify(segment)}`);
+    this.name = "McpInvalidPathSegmentError";
+  }
+}
+
+const MAX_SEGMENT_DECODES = 4;
+
+function decodeSegment(value: string): string {
+  let current = value;
+  for (let pass = 0; pass < MAX_SEGMENT_DECODES; pass += 1) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      break;
+    }
+    if (decoded === current) break;
+    current = decoded;
+  }
+  return current;
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function assertSafeMcpPath(path: string): void {
+  const pathname = path.split(/[?#]/)[0] ?? "";
+  for (const raw of pathname.split("/")) {
+    if (raw.length === 0) continue;
+    const decoded = decodeSegment(raw);
+    if (
+      /^\.{1,2}$/.test(decoded) ||
+      decoded.includes("/") ||
+      decoded.includes("\\") ||
+      hasControlCharacter(decoded)
+    ) {
+      throw new McpInvalidPathSegmentError(raw);
+    }
+  }
+}
+
 // Builds the dispatch for one MCP request. Only three headers cross into the
 // inner request — the caller's bearer, the JSON content type, and the internal
 // nonce — so an inbound cookie or forwarding header can never influence the
@@ -43,6 +98,7 @@ export function createRestDispatch(
   options: McpDispatchOptions
 ): McpRestDispatch {
   return ({ method, path, body }) => {
+    assertSafeMcpPath(path);
     const headers: Record<string, string> = {
       authorization: options.authHeader,
       [X_LEXA_INTERNAL_MCP]: getInternalMcpToken(),

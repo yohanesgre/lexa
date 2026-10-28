@@ -1777,6 +1777,9 @@ POST /mcp  (server/entry.ts Bun fetch | server/workers-entry.ts fetch)
   │   • tool → McpRestCall { method, path, body }
   │
   ├─ dispatch — server/mcp/rest.ts createRestDispatch
+  │   • validates every caller-controlled path segment (dot-segment
+  │     equivalents and separators/control characters are rejected before URL
+  │     construction, so no tool can repoint the request at a sibling route)
   │   • synthesizes a Request with ONLY: caller bearer, content-type (bodies),
   │     and the unguessable internal marker → the entry's existing API handler
   │     (createApiHandler on Bun, handleApi on Workers) — no self-fetch, no

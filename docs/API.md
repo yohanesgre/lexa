@@ -2622,7 +2622,11 @@ wherever the REST operation does; wiki tools take `pageSlug`.
 | `lexa_update_wiki_page` | `PATCH /api/projects/:slug/wiki/:pageSlug` | Update with existing revision/validation rules; optional `saveType`. |
 
 An input not in this table is not callable: unknown tools and schema-invalid
-arguments are rejected by the SDK before any mutation. No permanent deletion,
+arguments are rejected by the SDK before any mutation. Caller-controlled path
+segments (project slug, task id, wiki page slug) are additionally validated
+before any request is built: a value whose percent-decoded form is a dot segment
+(`.`/`..` and encoded equivalents), or contains a path separator or control
+character, is refused as a tool error with `INVALID_ARGS`. No permanent deletion,
 bulk operation, task-link change, attachment, sharing, revision restore,
 administration, key management, Assistant/private-chat, or outbound-MCP tool is
 exposed.
