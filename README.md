@@ -16,6 +16,7 @@ provisions D1 + R2 + KV and deploys the prebuilt Worker
 - **Milestones** — goals above sprints with target dates, progress tracking, timeline gantt
 - **AI Assistant** (Cloudflare Workers deploy only) — streaming chat with threads, document Generate with review-in-editor, a multi-provider gateway, builtin agent + skills rule bundles, and a proposed-actions approval flow for task/wiki writes
 - **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for scripts and the CLI
+- **Remote MCP server**: a Streamable HTTP `/mcp` endpoint so an external MCP client (OpenBot and other hosts) acts as a personal key's owner with 22 project, task, activity, and wiki tools; stateless, personal bearer only, no per-key scopes
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
 - **`lx`** — headless operator CLI for tasks, wiki, projects, GitHub status, and upgrades; also the integration surface for external agents
 
@@ -119,8 +120,37 @@ lx wiki get getting-started --project my-project
 - For anything the CLI doesn't cover, speak the REST contract directly:
   [`docs/API.md`](docs/API.md).
 - `lx task list|get|create|move|update` and `lx wiki list|get` are the
-  supported integration surface for external harnesses. Nothing else is
-  API-stable; there is no agent-runtime/machine listener to install.
+  supported CLI surface for external harnesses, and the MCP server below is the
+  other. Nothing else is API-stable; there is no agent-runtime/machine listener
+  to install.
+
+### Remote MCP (Streamable HTTP)
+
+The same account also speaks Model Context Protocol, so a client such as
+OpenBot can operate projects, tasks, activity, and the wiki directly.
+
+- **Endpoint.** Your instance's canonical origin plus `/mcp` (for example
+  `https://lexa.example.com/mcp`). The origin is `LXK_PUBLIC_URL`; on Workers
+  the install script stamps it, and it must be the public origin because it
+  also produces the URL advertised by `GET /api/capabilities` (`mcpUrl`) and
+  the `/mcp` Origin allow-list.
+- **Find the URL.** Settings → Me → API Keys → "Connect an MCP client" shows
+  and copies the exact endpoint.
+- **Client setup (OpenBot).** Transport `Streamable HTTP`, server URL the value
+  above, the header `Authorization: Bearer lxk_...` with a personal key created
+  in that section, and Sign-in app empty.
+- **Authority.** A tool call carries exactly the key owner's permissions. There
+  are no per-key scopes and no OAuth. Use a dedicated key for the client so it
+  can be revoked on its own; that separates revocation, not authority.
+- **Tools.** Only the 22 approved project, task, activity, and wiki tools are
+  exposed ([catalog](docs/API.md#inbound-mcp-server-mcp)). There is no permanent
+  deletion, bulk operation, attachment, sharing, administration, key-management,
+  or assistant/chat tool.
+- **Freshness.** Every request re-checks the key and project access, so a
+  revoked key or removed grant fails on the next request, not on reconnect.
+
+Cookie sessions and unbound server keys are rejected on `/mcp`; a personal
+`lxk_` bearer is the only credential.
 
 ## Environment variables
 
@@ -150,7 +180,7 @@ Design and API docs live in [`docs/`](docs/):
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Big picture: stack, auth, sync, request pipeline |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | SQL schema and data invariants |
-| [`docs/API.md`](docs/API.md) | REST contract |
+| [`docs/API.md`](docs/API.md) | REST contract; inbound MCP server (`/mcp`) and its tool catalog |
 | [`docs/LAYERS.md`](docs/LAYERS.md) | Effect service patterns, error catalog, webhook/auth flows |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Self-hosting via install.sh: the Workers target, env reference, bootstrap |
 | [`docs/CLOUDFLARE_WORKERS.md`](docs/CLOUDFLARE_WORKERS.md) | Workers runtime: D1/R2/KV bindings, quirks, cron |

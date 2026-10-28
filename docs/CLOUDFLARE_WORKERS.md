@@ -302,6 +302,20 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   The assistant exists on Bun and Workers alike — no external runner to host;
   outbound subrequest budget 50/request free, 1000 paid.
 
+### Inbound MCP (`/mcp`)
+
+The same Worker fetch handler (`server/workers-entry.ts`) serves the inbound
+MCP endpoint; it adds no binding, Durable Object, route, variable, or secret,
+and needs no AI/master-key configuration. Each `POST` builds a stateless SDK
+server + transport inside the isolate, authenticates a personal `lxk_` bearer
+against D1, and replays one approved REST operation through the existing API
+handler, so no instance holds session state. The endpoint address and the
+request Origin allow-list both come from the canonical HTTPS origin
+(`LXK_PUBLIC_URL`): a wrong value advertises the wrong `mcpUrl` and rejects
+browser-origin requests. Deploying to staging or production is a separate
+operator action; there is no separate MCP enablement or configuration in the
+build or install script.
+
 ## Managed document conversion
 
 The Worker declares `ai: { "binding": "AI" }` in Wrangler config. `server/document-conversion.ts` calls the Workers AI `AI.toMarkdown([{ name, blob }])` binding only for validated binary documents; it does not change `workers_ai` model-provider dispatch. `.md`, `.markdown`, and `.txt` decode as strict UTF-8 without a service call. Missing binding, thrown request, service error, missing result, and empty output fail explicitly. There is no OCR, LLM, or parser fallback, and conversion never persists a second document representation. Images keep their existing vision path.
