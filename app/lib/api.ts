@@ -254,6 +254,8 @@ export function getBoard(slug: string, includeArchived = false): Promise<Board> 
 export interface Capabilities {
   assistant: boolean;
   flavor: "bun" | "workers";
+  // Canonical public origin + `/mcp`, resolved server-side; never the browser host.
+  mcpUrl: string;
   tasksBulk?: boolean | undefined;
   // LX-2 kill switch (LXK_DISABLE_CHAT_ATTACHMENTS=1 → false); absent on older
   // builds, which the UI treats as enabled.
