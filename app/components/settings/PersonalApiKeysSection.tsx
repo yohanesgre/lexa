@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
-import { Key, Plus, Trash2 } from "lucide-react";
-import { useMyApiKeys, useCreateMyApiKey, useDeleteMyApiKey } from "../../lib/queries";
+import { AlertTriangle, Copy, Key, Plus, Trash2 } from "lucide-react";
+import { useMyApiKeys, useCreateMyApiKey, useDeleteMyApiKey, useCapabilities } from "../../lib/queries";
+import { copyToClipboard } from "../../lib/clipboard";
 import { formatRelative } from "../../lib/relative-time";
 import { ApiKeyRevealModal, DeleteKeyModal } from "./SettingsSections";
 
@@ -18,11 +19,15 @@ export function PersonalApiKeysSection() {
   const { data: keys = [], isLoading, isError } = useMyApiKeys();
   const createKey = useCreateMyApiKey();
   const deleteKey = useDeleteMyApiKey();
+  const capabilities = useCapabilities();
   const [keyName, setKeyName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ name: string; key: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const generateBtnRef = useRef<HTMLButtonElement>(null);
+  const mcpUrl = capabilities.data?.mcpUrl;
+  const keysLoaded = !isLoading && !isError;
 
   const handleGenerate = () => {
     if (!keyName.trim()) {
@@ -39,6 +44,11 @@ export function PersonalApiKeysSection() {
     });
   };
 
+  const handleCopyMcpUrl = async () => {
+    if (!mcpUrl) return;
+    setCopyState((await copyToClipboard(mcpUrl)) ? "copied" : "failed");
+  };
+
   return (
     <section className="mb-8 max-w-3xl">
       <div className="flex items-center justify-between mb-3">
@@ -48,6 +58,63 @@ export function PersonalApiKeysSection() {
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
         Keys let scripts, agents, and the CLI work with your account. Each key has exactly your project access — never more. Signing in from the CLI (lx) creates one here automatically.
       </p>
+
+      <div className="card-panel mb-4">
+        <h3 className="font-display text-base font-medium text-lx-text-primary mb-1">Connect an MCP client</h3>
+        <p className="text-sm text-lx-text-secondary mb-3" style={{ maxWidth: 560 }}>
+          Use Streamable HTTP with this URL and a personal API key.
+        </p>
+
+        <div className="field-label" id="mcp-url-label">MCP server URL</div>
+        {mcpUrl ? (
+          <>
+            <div className="key-display" role="group" aria-labelledby="mcp-url-label">
+              <code>{mcpUrl}</code>
+              <button
+                type="button"
+                className="btn btn-ghost flex-shrink-0"
+                style={{ minHeight: "var(--lx-row-h-touch)", padding: "0 12px", fontSize: 12 }}
+                onClick={() => void handleCopyMcpUrl()}
+              >
+                <Copy size={12} strokeWidth={1.5} />
+                Copy MCP URL
+              </button>
+            </div>
+            <div role="status" aria-live="polite" aria-atomic="true">
+              {copyState === "copied" && <div className="field-hint">MCP URL copied.</div>}
+              {copyState === "failed" && <div className="field-hint field-hint-danger">Could not copy the URL. Select and copy it manually.</div>}
+            </div>
+          </>
+        ) : capabilities.isLoading ? (
+          <div className="text-sm text-lx-text-muted">Loading…</div>
+        ) : (
+          <div className="text-sm text-lx-text-secondary">Could not load the MCP server URL. Reload the page and try again.</div>
+        )}
+
+        <div className="notice notice-warning mt-3">
+          <AlertTriangle size={16} strokeWidth={1.5} />
+          <span>This key gives the client the same permissions as your account. Use a separate key for OpenBot so you can revoke it independently.</span>
+        </div>
+
+        {mcpUrl && (
+          <>
+            <p className="text-sm text-lx-text-secondary mt-3" style={{ maxWidth: 560 }}>
+              A key by itself is not a connection. In OpenBot:
+            </p>
+            <ol className="text-sm text-lx-text-secondary" style={{ listStyle: "decimal", paddingLeft: 20, margin: "4px 0 0", maxWidth: 560, lineHeight: 1.5 }}>
+              <li>Create a personal key named OpenBot below and copy it when it is shown.</li>
+              <li>Set Name to Lexa, Transport to Streamable HTTP, and Server URL to the MCP server URL above.</li>
+              <li>Add the header <KeyCode>Authorization</KeyCode> with the value <KeyCode>Bearer &lt;personal-api-key&gt;</KeyCode>.</li>
+              <li>Leave Sign-in app empty when using an API key.</li>
+              <li>Select Test connection, then ask OpenBot to list projects.</li>
+            </ol>
+          </>
+        )}
+        <div className="field-hint">Keys are shown only once. If you no longer have the key, create a new one.</div>
+        {keysLoaded && keys.length === 0 && (
+          <div className="field-hint">Create a key named OpenBot below, then paste it into OpenBot as an Authorization header.</div>
+        )}
+      </div>
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
