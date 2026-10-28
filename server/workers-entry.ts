@@ -42,7 +42,7 @@ import type {
   Response as WorkersResponse,
   ScheduledController,
 } from "@cloudflare/workers-types";
-import { getEnvFromWorkers, legacyGithubEnvVars, type RuntimeEnv } from "./env";
+import { getEnvFromWorkers, legacyGithubEnvVars, resolvePublicUrl, resolveTrustedProxyCidrs, type RuntimeEnv } from "./env";
 import type { ManagedMarkdownBinding } from "./document-conversion";
 import { RuntimeEnvLive, RuntimeEnvTag } from "./runtime-env";
 import { Db, DbD1Live, batch as batchStmts, queryFirst, run } from "./db/db";
@@ -56,8 +56,11 @@ import {
 } from "./api/workers-ports";
 import { createWorkersApiHandler } from "./api/assistant-api";
 import { createAuth, handleAuthSurface } from "./auth";
-import { resolveMaxApiBody } from "./api/limits";
-import { syncRateLimitFromDbAsync } from "./api/rate-limit";
+import { resolveMaxApiBody, X_LEXA_INTERNAL_MCP } from "./api/limits";
+import { resolveApiKeyIdentityAsync } from "./api/auth-key";
+import { handleMcpRequest, MCP_PATH } from "./mcp/http";
+import { createRestDispatch, type McpIdentity } from "./mcp/rest";
+import { syncRateLimitFromDbAsync, resolveClientIp } from "./api/rate-limit";
 import { r2StorageConfig, type R2Bucket as NarrowR2Bucket } from "./storage/config";
 import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
 import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
@@ -229,6 +232,32 @@ export function getRuntimeAuth(runtimeEnv: RuntimeEnv): { auth: BetterAuthApi } 
 // Test-only: drop the per-isolate auth cache so a test can observe a rebuild.
 export function resetAuthCache(): void {
   authCache = null;
+}
+
+// Personal key only: an unbound legacy/server key (user_id NULL) resolves as a
+// server-owned admin on REST but cannot become an MCP caller here. The cookie
+// channel does not exist on /mcp.
+async function authenticateMcp(driver: DbDriver, authHeader: string): Promise<McpIdentity | null> {
+  const resolved = await Effect.runPromise(
+    resolveApiKeyIdentityAsync(driver, authHeader).pipe(Effect.catchAll(() => Effect.succeed(null)))
+  );
+  if (!resolved || resolved.userId === null) return null;
+  return {
+    keyId: resolved.keyId,
+    keyName: resolved.keyName,
+    userId: resolved.userId,
+    userName: resolved.userName,
+    role: resolved.role,
+  };
+}
+
+// Only a /mcp dispatch built inside this isolate may carry the limiter-exemption
+// marker (the nonce is random, and an inbound copy is dropped before /api).
+function stripInternalMcpMarker(req: WorkersRequest): WorkersRequest {
+  if (!req.headers.has(X_LEXA_INTERNAL_MCP)) return req;
+  const headers = Object.fromEntries(req.headers.entries());
+  delete headers[X_LEXA_INTERNAL_MCP];
+  return new Request(req as unknown as Request, { headers }) as unknown as WorkersRequest;
 }
 
 async function handleApi(
@@ -533,6 +562,28 @@ const handler: ExportedHandler<WorkersEnv> = {
       await ensureBoot(env);
       const { runtimeEnv, driver, base } = requestLayers(env);
 
+      // Inbound MCP (Streamable HTTP): personal bearer only, stateless, and
+      // independent of the assistant/provider configuration. Its tool calls
+      // replay approved REST operations through handleApi below.
+      if (path === MCP_PATH) {
+        const clientIp = resolveClientIp(
+          "",
+          req.headers.get("cf-connecting-ip"),
+          resolveTrustedProxyCidrs(runtimeEnv)
+        );
+        const authHeader = req.headers.get("authorization") ?? "";
+        const response = await handleMcpRequest(req as unknown as Request, {
+          env: runtimeEnv,
+          clientIp,
+          authenticate: (header) => authenticateMcp(driver, header),
+          dispatch: createRestDispatch(
+            (inner) => handleApi(inner as unknown as WorkersRequest, runtimeEnv, driver, env.BLOB),
+            { authHeader, baseUrl: resolvePublicUrl(runtimeEnv) }
+          ),
+        });
+        return response as unknown as WorkersResponse;
+      }
+
       if (path === "/api/webhooks/github") {
         return (await handleWebhook(req, ctx, base, driver)) as unknown as WorkersResponse;
       }
@@ -554,7 +605,7 @@ const handler: ExportedHandler<WorkersEnv> = {
       // below — no WebSocket gate, no `/api/internal/assistant/*` HMAC surface,
       // no Durable Object. The DO modules are deleted.
       if (path.startsWith("/api/")) {
-        return (await handleApi(req, runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;
+        return (await handleApi(stripInternalMcpMarker(req), runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;
       }
       // Only /share/* is server-rendered; every other route is client-only and
       // served the prerendered SPA shell (per-response entry-script patch).

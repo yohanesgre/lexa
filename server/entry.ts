@@ -15,9 +15,12 @@ import { assertMarkdownReady } from "./db/document-format";
 import { sweepStaleAssistantTasks } from "./assistant/stale-runs";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
-import { getEnv, legacyGithubEnvVars, resolveTrustedProxyCidrs } from "./env";
+import { getEnv, legacyGithubEnvVars, resolvePublicUrl, resolveTrustedProxyCidrs } from "./env";
 import { resolveClientIp, syncRateLimitFromDb } from "./api/rate-limit";
-import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
+import { MAX_API_BODY, X_LEXA_INTERNAL_MCP, X_LEXA_REMOTE_IP } from "./api/limits";
+import { resolveApiKeyIdentity } from "./api/auth-key";
+import { handleMcpRequest, MCP_PATH } from "./mcp/http";
+import { createRestDispatch, type McpIdentity } from "./mcp/rest";
 import { bodyCapFor, resolveStorageConfig } from "./storage/config";
 import { runBackup, createBackupDriver, DEFAULT_BACKUP_RETENTION } from "./storage/backup";
 import { auth, handleAuthSurface, readBodyWithLimit } from "./auth";
@@ -64,6 +67,28 @@ const TRUSTED_PROXY_CIDRS = resolveTrustedProxyCidrs(getEnv());
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
 runMigrations(DATABASE_PATH);
+// Inbound MCP authenticates every HTTP request outside the API stack, so it
+// needs its own shared connection (WAL is a DB property; busy_timeout keeps the
+// hourly last_used_at touch from failing against concurrent API writes). One
+// connection for the process — never a per-request open.
+const mcpAuthDb = new Database(DATABASE_PATH);
+mcpAuthDb.exec("PRAGMA busy_timeout = 5000");
+
+// Personal keys only: a NULL user_id row is a legacy/server key, which REST
+// maps to a server-owned admin identity but which must never become an MCP
+// caller. Cookies are not consulted anywhere on this boundary.
+function authenticateMcp(authHeader: string): Promise<McpIdentity | null> {
+  const identity = resolveApiKeyIdentity(authHeader, new Headers(), mcpAuthDb, DATABASE_PATH);
+  if (!identity || identity.userId === null) return Promise.resolve(null);
+  return Promise.resolve({
+    keyId: identity.keyId,
+    keyName: identity.keyName,
+    userId: identity.userId,
+    userName: identity.userName,
+    role: identity.role,
+  });
+}
+
 // The settings DB is the single source of truth at runtime. Env is a
 // first-boot bootstrap only: mirror it into the DB once (when keys are
 // empty), THEN apply the DB-configured rate limits + GitHub credentials.
@@ -217,6 +242,21 @@ const server: Server<unknown> = Bun.serve({
       );
     }
 
+    if (path === MCP_PATH) {
+      const socketIp = server.requestIP(req)?.address ?? "";
+      const clientIp = resolveClientIp(socketIp, req.headers.get("cf-connecting-ip"), TRUSTED_PROXY_CIDRS);
+      const runtimeEnv = getEnv();
+      return handleMcpRequest(req, {
+        env: runtimeEnv,
+        clientIp,
+        authenticate: authenticateMcp,
+        dispatch: createRestDispatch(apiHandler, {
+          authHeader: req.headers.get("authorization") ?? "",
+          baseUrl: resolvePublicUrl(runtimeEnv),
+        }),
+      });
+    }
+
     if (url.pathname.startsWith("/api/")) {
       // Better Auth — mounted BEFORE the API-key middleware. The auth handler
       // is its own auth: keyless by design (session cookies). The keyless
@@ -283,6 +323,9 @@ const server: Server<unknown> = Bun.serve({
       const socketIp = server.requestIP(req)?.address ?? "";
       if (apiReq.headers.has(X_LEXA_REMOTE_IP)) apiReq.headers.delete(X_LEXA_REMOTE_IP);
       apiReq.headers.set(X_LEXA_REMOTE_IP, socketIp);
+      // Only the in-process /mcp dispatch may carry the limiter-exemption
+      // marker; strip any inbound copy so a client cannot mint one.
+      if (apiReq.headers.has(X_LEXA_INTERNAL_MCP)) apiReq.headers.delete(X_LEXA_INTERNAL_MCP);
       try {
         // Security headers are applied by the HttpApi middleware; the
         // middleware also covers router 404s and its own short-circuits.
