@@ -4,8 +4,8 @@ import { Cause, Effect } from "effect";
 import type { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { AuthIdentity, AuthIdentityShape } from "./auth";
-import { resolveApiKeyIdentity } from "./auth-key";
-import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./limits";
+import { resolveApiKeyIdentity, constantTimeTokenEqual } from "./auth-key";
+import { getInternalMcpToken, MAX_API_BODY, X_LEXA_INTERNAL_MCP, X_LEXA_REMOTE_IP } from "./limits";
 import { bodyCapFor, resolveStorageConfig } from "../storage/config";
 import { apiRateLimiter, isRateLimitExemptPath, resolveClientIp, shareRateLimiter } from "./rate-limit";
 import { getEnv, resolveTrustedProxyCidrs, type RuntimeEnv } from "../env";
@@ -98,10 +98,15 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
       // all paths now that the runtime daemon surfaces are gone). IP is
       // resolved in entry (socket only visible there) and stamped on the
       // reconstructed Request — any inbound x-lexa-remote-ip is deleted first.
+      // A `/mcp` tool call's in-process dispatch carries the per-process nonce
+      // (entries strip inbound copies): the outer MCP request already charged
+      // this bucket, so the inner route must not charge it a second time.
       const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
       const ip = resolveClientIp(stampedIp, request.headers["cf-connecting-ip"], trustedProxyCidrs);
       const limiter = isPublicShare ? shareRateLimiter : apiRateLimiter;
-      if (!isRateLimitExemptPath(path) && !limiter.check(ip)) {
+      const internalMcp = request.headers[X_LEXA_INTERNAL_MCP];
+      const isInternalMcp = typeof internalMcp === "string" && constantTimeTokenEqual(internalMcp, getInternalMcpToken());
+      if (!isInternalMcp && !isRateLimitExemptPath(path) && !limiter.check(ip)) {
         const retryAfter = Math.ceil(limiter.retryAfterMs(ip) / 1000);
         console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
         return withSecurityHeaders(

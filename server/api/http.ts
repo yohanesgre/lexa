@@ -56,8 +56,8 @@ import { resolveStorageConfig, bodyCapFor, type StorageConfigShape } from "../st
 import { adminEmailsFrom, currentEnv, storageEnvFrom, RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
 import { tasksBulkEnabled } from "../capabilities";
 import { getEnv, resolvePublicUrl, resolveTrustedProxyCidrs } from "../env";
-import { resolveApiKeyIdentityAsync } from "./auth-key";
-import { resolveMaxApiBody, X_LEXA_REMOTE_IP } from "./limits";
+import { resolveApiKeyIdentityAsync, constantTimeTokenEqual } from "./auth-key";
+import { getInternalMcpToken, resolveMaxApiBody, X_LEXA_INTERNAL_MCP, X_LEXA_REMOTE_IP } from "./limits";
 import { apiRateLimiter, shareRateLimiter, resolveClientIp, isRateLimitExemptPath } from "./rate-limit";
 import { ApiKeyService } from "../services/api-key.service";
 import { ApiKeyRepo } from "../repos/api-key.repo";
@@ -3594,7 +3594,12 @@ export function createWorkersApiMiddleware(
 
       const ip = workersClientIp(request.headers, trustedProxyCidrs);
       const limiter = isPublicShare ? shareRateLimiter : apiRateLimiter;
-      if (!isRateLimitExemptPath(path) && !limiter.check(ip)) {
+      // `/mcp` dispatches its tool calls in-process; the outer MCP request
+      // already charged this bucket, so the nonce-marked inner request skips
+      // only the limiter. Inbound copies are stripped in the Workers entry.
+      const internalMcp = request.headers[X_LEXA_INTERNAL_MCP];
+      const isInternalMcp = typeof internalMcp === "string" && constantTimeTokenEqual(internalMcp, getInternalMcpToken());
+      if (!isInternalMcp && !isRateLimitExemptPath(path) && !limiter.check(ip)) {
         const retryAfter = Math.ceil(limiter.retryAfterMs(ip) / 1000);
         console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
         return withSecurityHeaders(

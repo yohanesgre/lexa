@@ -1749,6 +1749,57 @@ One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before deco
 - **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
 - **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
 
+### Inbound MCP server (`/mcp`) — per-request server over authenticated routes
+
+`server/mcp/**` adds no service, repository, table, or domain rule. Each MCP
+tool is a thin adapter that replays an approved REST operation against the
+**same** authenticated in-process route stack, so the route layer keeps owning
+its orchestration (notably GitHub state sync on task move/update) and
+invariants 1–14 are untouched.
+
+```
+POST /mcp  (server/entry.ts Bun fetch | server/workers-entry.ts fetch)
+  │
+  ├─ boundary — server/mcp/http.ts
+  │   • rates the request once against apiRateLimiter (shared bucket, before auth)
+  │   • resolves a personal bearer (auth-key.ts resolveApiKeyIdentity on Bun /
+  │     resolveApiKeyIdentityAsync on Workers); user_id NULL is refused, and the
+  │     session-cookie path is never consulted
+  │   • creates ONE McpServer + WebStandardStreamableHTTPServerTransport
+  │     (stateless: sessionIdGenerator undefined; enableJsonResponse;
+  │      maxRequestBodySize = resolveMaxApiBody; Origin allow-list =
+  │      resolveTrustedOrigins, absent Origin allowed; DNS-rebinding guard on)
+  │   • closes server+transport when the response is done
+  │
+  ├─ tools/call — server/mcp/catalog.ts (22 registered lexa_* tools)
+  │   • zod input schema = documented REST fields/query names (projectSlug for
+  │     the :slug path), omissions/null preserved
+  │   • tool → McpRestCall { method, path, body }
+  │
+  ├─ dispatch — server/mcp/rest.ts createRestDispatch
+  │   • synthesizes a Request with ONLY: caller bearer, content-type (bodies),
+  │     and the unguessable internal marker → the entry's existing API handler
+  │     (createApiHandler on Bun, handleApi on Workers) — no self-fetch, no
+  │     caller-chosen origin, no cookie, no direct SQL
+  │
+  ├─ HTTP layer — unchanged middleware/routes
+  │   • middleware re-authenticates the bearer (fresh role/permissions),
+  │     skips the per-IP limiter only for the marker (already charged at /mcp),
+  │     then the normal route → domain service → GitHub orchestration chain runs
+  │
+  └─ result — the persisted REST body becomes structuredContent + text;
+      a domain envelope becomes an MCP tool error carrying its existing code
+```
+
+Marker trust: `X_LEXA_INTERNAL_MCP` is compared against a per-process random
+token (`server/api/limits.ts`, created lazily on first use inside a request
+because production workerd forbids global-scope randomness) and both entries
+delete any inbound copy before routing, so an external caller cannot obtain the
+double-charge exemption.
+`GET /api/capabilities` additionally exposes `mcpUrl` from
+`resolvePublicUrl(RuntimeEnv)`; no new env key, table, or REST `/api` endpoint
+exists — `/mcp` is the feature's only new surface.
+
 ## Pagination
 
 All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId>:<position>:<taskId>"` for tasks). Unbounded lists would blow the server memory.

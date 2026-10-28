@@ -6,7 +6,7 @@
 
 | Concern | Convention |
 |---------|-----------|
-| Base URL | `https://<host>/api` (the deploy origin — Cloudflare Workers, or the Bun server behind the cloudflared tunnel) |
+| Base URL | `https://<host>/api` (the deploy origin — Cloudflare Workers, or the Bun server behind the cloudflared tunnel). The inbound MCP server is the separate `https://<host>/mcp` endpoint — see Inbound MCP server. |
 | Auth | Dual-channel: `Authorization: Bearer lxk_<43 base62 chars>` (machines — required by every `/api/*` route except the exempt list below, see Auth) OR a Better Auth session cookie (humans — browsers). `/api/auth/*` is mounted BEFORE the key middleware. The `x-lxk-user` header is removed. |
 | Content type | `application/json; charset=utf-8` |
 | IDs | UUID strings; users, teams (organizations), sessions and related Better Auth rows use Better Auth ids (32-char, `[a-zA-Z0-9]`; migrated legacy rows are 32 lowercase hex — opaque, do not pattern-match) |
@@ -488,9 +488,16 @@ GET    /api/health
 
 GET    /api/capabilities
 → 200 { assistant: boolean, flavor: "bun" | "workers",
-        chatAttachments: boolean, tasksBulk: boolean }
+        chatAttachments: boolean, tasksBulk: boolean,
+        mcpUrl: string }
   API-key exempt. Flavor + capability discovery (ADR-0003 §F.2, revised by
   ADR-0005 D7), served before boot on both flavors, no DB read, no leak.
+  `mcpUrl` is the canonical inbound MCP endpoint (see Inbound MCP server):
+  `resolvePublicUrl(RuntimeEnv) + "/mcp"` — `LXK_PUBLIC_URL` (dev default
+  `http://localhost:5173`) with any trailing slash trimmed. It is derived
+  server-side; the request Host/Origin and `window.location` never supply it.
+  The value is configuration, not a secret, and does not depend on the
+  assistant/provider flags.
   `assistant` is `true` on **both** flavors whenever `LXK_SECRETS_MASTER_KEY` is
   configured (the assistant needs it for provider-secret decryption); the flavor
   no longer decides it. `chatAttachments` is
@@ -2497,6 +2504,149 @@ DELETE /api/assistant/memory/:projectId/:memoryId
                                          milestones: [{id, name, dueAt,
                                          archived}] }
 ```
+
+## Inbound MCP server (`/mcp`)
+
+Lexa exposes its own Model Context Protocol server over Streamable HTTP, so an
+external MCP client can operate the same projects, tasks, activity, and wiki as
+the key's owner. It is co-hosted with the app on both flavors (Cloudflare
+Workers and the Bun development server). The outbound **Assistant MCP clients**
+registry above is a different feature: it remains a client, and this server
+accepts no inbound transport configuration from it.
+
+### Transport
+
+```
+POST   /mcp    JSON-RPC 2.0 over Streamable HTTP (initialize, tools/list, tools/call)
+GET    /mcp    405 — no server-initiated stream is offered (stateless)
+DELETE /mcp    405 — there is no session to terminate
+```
+
+- **Stateless.** No `Mcp-Session-Id`, no in-memory authenticated session, no
+  Durable Object, no per-user registration. Every accepted POST builds a fresh
+  MCP server + transport and disposes both after the response, so any request
+  may be served by any Worker instance.
+- **JSON responses.** POST replies are `application/json` (the SDK's
+  `enableJsonResponse`); SSE streaming is not used for requests.
+- **SDK/protocol.** `@modelcontextprotocol/sdk` 1.30.1,
+  `WebStandardStreamableHTTPServerTransport`. Protocol version negotiation,
+  JSON-RPC framing, and `tools/list` pagination are the SDK's, not a hand-built
+  REST imitation.
+- **Canonical URL.** `GET /api/capabilities` → `mcpUrl`, computed server-side as
+  `resolvePublicUrl(RuntimeEnv) + "/mcp"` (`LXK_PUBLIC_URL`, dev default
+  `http://localhost:5173`). The request Host/Origin and the browser location are
+  never consulted. In the Bun flavor vite forwards `/mcp` to the API server
+  (same target as `/api`); the Workers flavor serves it directly.
+
+### Authentication
+
+- `Authorization: Bearer lxk_<43 base62>` with a **user-bound personal key**
+  (`api_keys.user_id NOT NULL`).
+- **Every** POST is authenticated — initialize, discovery, and calls. There is
+  no session ticket: validity is re-checked against the DB on each request, so a
+  revoked key or removed project access fails the next request even on an
+  already-used connection. Tool calls additionally re-authenticate through the
+  existing REST middleware on the in-process dispatch (see below).
+- **Cookie-only requests are rejected.** The browser session cookie is never
+  read on this boundary; even a request that authenticates to `/api` with a
+  session cookie is `401` here.
+- **Unbound legacy/server keys are rejected.** A key row with `user_id NULL`
+  (pre-user-binding installs, seeded server keys) resolves to a server-owned
+  admin identity on REST but cannot establish a personal MCP identity.
+- Failure shape is the REST envelope: `401 { "error": { "code":
+  "UNAUTHORIZED", "message": "Invalid or missing API key" } }`.
+- Tool results never contain API keys, and no MCP tool manages credentials.
+
+### Origin, limits, and isolation
+
+- **Origin:** when the request carries an `Origin` header it must match
+  `resolveTrustedOrigins` (`LXK_PUBLIC_URL` plus `LXK_TRUSTED_ORIGINS`, plus
+  `http://localhost:5173` in dev) — otherwise `403` with a JSON-RPC error body.
+  A request with **no** Origin header is accepted (non-browser MCP clients);
+  Origin is not authentication. The flag comes from the transport's
+  DNS-rebinding protection, not a route-level check. No CORS headers are
+  emitted: browser-origin use is not a supported client.
+- **Rate limit:** every `/mcp` HTTP request charges the shared per-IP
+  `apiRateLimiter` bucket once, before auth, exactly like `/api/*`.
+  `429 { "error": { "code": "RATE_LIMITED", "message": "Rate limit exceeded" } }`
+  with `Retry-After`. The in-process REST dispatch for a tool call is marked as
+  internal so the API middleware does not charge the same request a second
+  time; the marker is an unguessable per-process nonce and both entries strip
+  any inbound copy before routing, so a client cannot mint one. One POST is one
+  charge (the SDK caps a JSON-RPC batch at 100 messages).
+- **Body cap:** the transport enforces `resolveMaxApiBody(RuntimeEnv)` —
+  `LXK_MAX_BODY_MB` (default 16) — against declared `Content-Length` and while
+  streaming, answering `413` before parsing. No MCP-specific size/rate default
+  exists.
+- **Headers:** every response carries `X-Content-Type-Options: nosniff` and
+  `Cache-Control: no-store`.
+- **Isolation:** server, transport, and tool closures are per request; there is
+  no cross-user cache, shared mutable tool state, or ambient identity. The
+  dispatch request carries only the caller's bearer, the JSON content type, and
+  the internal marker — never the inbound cookie or arbitrary headers.
+- **Trust boundary:** the MCP client receives the user's key and every document
+  it reads. Lexa does not control the client's storage, model provider,
+  approval prompts, or key redaction.
+
+### Tool catalog
+
+Project path argument is `projectSlug` in every tool (the REST path `:slug`).
+All other input names are the documented REST field/query names verbatim;
+omitted optional fields stay omitted and explicit `null` stays `null` (e.g.
+`dueAt`). Task identifiers accept the immutable ticket key (`PREFIX-n`)
+wherever the REST operation does; wiki tools take `pageSlug`.
+
+| Tool | REST operation | Purpose |
+| --- | --- | --- |
+| `lexa_list_projects` | `GET /api/projects` | Accessible projects (`{ data, nextCursor }`). |
+| `lexa_get_project` | `GET /api/projects/:slug` | One project. |
+| `lexa_get_board` | `GET /api/projects/:slug/board` | Unpaginated board snapshot; optional `includeArchived`. Board rows omit `description`. |
+| `lexa_list_columns` | `GET /api/projects/:slug/columns` | Columns + WIP/required-field guards. |
+| `lexa_list_swimlanes` | `GET /api/projects/:slug/swimlanes` | Backlog + sprint IDs (incl. archived). |
+| `lexa_list_milestones` | `GET /api/projects/:slug/milestones` | Milestones (incl. archived). |
+| `lexa_get_field_config` | `GET /api/projects/:slug/field-config` | Priority/type option IDs. |
+| `lexa_list_project_members` | `GET /api/projects/:slug/members` | Explicit project-role members only. |
+| `lexa_list_tasks` | `GET /api/projects/:slug/tasks?columnId&swimlaneId&assignee&type&limit&cursor` | Filtered, cursor-paginated list. |
+| `lexa_get_task` | `GET /api/projects/:slug/tasks/:id` | Full task + Markdown description. |
+| `lexa_create_task` | `POST /api/projects/:slug/tasks` | Create with existing defaults/guards. |
+| `lexa_update_task` | `PATCH /api/projects/:slug/tasks/:id` | Update supplied fields only. |
+| `lexa_move_task` | `POST /api/projects/:slug/tasks/:id/move` | Guarded move/reorder; route-level GitHub state sync still runs. |
+| `lexa_archive_task` | `POST /api/projects/:slug/tasks/:id/archive` | Archive (idempotent). |
+| `lexa_restore_task` | `POST /api/projects/:slug/tasks/:id/restore` | Restore (idempotent). |
+| `lexa_get_task_activity` | `GET /api/projects/:slug/tasks/:id/activity?cursor&limit` | Activity + comments page. |
+| `lexa_create_comment` | `POST /api/projects/:slug/tasks/:id/comments` | Attributed Markdown comment. |
+| `lexa_list_wiki_pages` | `GET /api/projects/:slug/wiki` | Flat page metadata list. |
+| `lexa_get_wiki_page` | `GET /api/projects/:slug/wiki/:pageSlug` | Full page Markdown. |
+| `lexa_search_wiki` | `GET /api/projects/:slug/wiki/search?q` | Project wiki FTS. `q` is required and non-empty. |
+| `lexa_create_wiki_page` | `POST /api/projects/:slug/wiki` | Create with existing nesting rules. |
+| `lexa_update_wiki_page` | `PATCH /api/projects/:slug/wiki/:pageSlug` | Update with existing revision/validation rules; optional `saveType`. |
+
+An input not in this table is not callable: unknown tools and schema-invalid
+arguments are rejected by the SDK before any mutation. No permanent deletion,
+bulk operation, task-link change, attachment, sharing, revision restore,
+administration, key management, Assistant/private-chat, or outbound-MCP tool is
+exposed.
+
+### Results and errors
+
+- A successful call returns the **persisted REST body** as `structuredContent`,
+  plus a `text` block carrying the same JSON. Mutation tools therefore return
+  the authoritative entity plus its `activity` rows, exactly as REST does.
+- A domain failure returns an MCP **tool error** (`isError: true`) whose text
+  and `structuredContent.error` carry the existing REST code, message, and
+  `details` (e.g. `WIP_LIMIT`, `REQUIRED_FIELD`, `INVALID_OPTION`,
+  `DEADLINE_AFTER_LANE`, `PAGE_NOT_FOUND`, `FORBIDDEN`). It is never converted
+  into an empty success result.
+- Protocol and boundary failures stay at the HTTP/JSON-RPC layer (`401`, `403`,
+  `413`, `429`, and the SDK's `-326xx` errors).
+- Writes are applied immediately and **never retried automatically**. If the
+  in-process dispatch yields no response, the tool error states that the
+  outcome is uncertain; the client must read current state before retrying.
+- Each tool call executes the complete authenticated route operation in-process
+  — middleware, route handler, services, and route-level GitHub orchestration
+  for task update/move — instead of a direct SQL/service shortcut. Project
+  access, role, WIP, required fields, activity transactions, Markdown source,
+  and wiki revisions are therefore the REST/UI behavior.
 
 ## Notes
 

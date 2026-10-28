@@ -5,7 +5,7 @@
 // only gate is the secrets master key (provider-secret decryption) — the flavor
 // no longer decides it.
 
-import type { RuntimeEnv } from "./env";
+import { resolvePublicUrl, type RuntimeEnv } from "./env";
 
 export type AssistantFlavor = "bun" | "workers";
 
@@ -20,13 +20,16 @@ export interface Capabilities {
   // flavor; refused outright by the LXK_DISABLE_TASKS_BULK kill switch. The
   // frontend gate is this flag; the endpoint refuses regardless.
   tasksBulk: boolean;
+  // Canonical inbound MCP endpoint: resolvePublicUrl(RuntimeEnv) + "/mcp".
+  // Server-derived config (never the request Host or window.location); it is
+  // not a secret and does not depend on the assistant/provider flags.
+  mcpUrl: string;
 }
 
-export interface CapabilityEnv {
-  LXK_SECRETS_MASTER_KEY?: string | undefined;
-  LXK_DISABLE_CHAT_ATTACHMENTS?: string | undefined;
-  LXK_DISABLE_TASKS_BULK?: string | undefined;
-}
+export type CapabilityEnv = Pick<
+  RuntimeEnv,
+  "LXK_SECRETS_MASTER_KEY" | "LXK_DISABLE_CHAT_ATTACHMENTS" | "LXK_DISABLE_TASKS_BULK" | "LXK_PUBLIC_URL"
+>;
 
 /** The assistant is available only where the master key is resolvable. */
 export function hasSecretsMasterKey(env: CapabilityEnv): boolean {
@@ -54,6 +57,7 @@ export function capabilities(flavor: AssistantFlavor, env: CapabilityEnv): Capab
     flavor,
     chatAttachments: assistant && chatAttachmentsEnabled(env),
     tasksBulk: tasksBulkEnabled(env),
+    mcpUrl: `${resolvePublicUrl(env).replace(/\/+$/, "")}/mcp`,
   };
 }
 
