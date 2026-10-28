@@ -183,6 +183,17 @@ export default defineConfig(async ({ command }) => {
                       },
                     }),
               },
+              // Inbound MCP is a POST/JSON surface on the same Bun host. Only
+              // changeOrigin rewrites Host; the incoming Origin is preserved
+              // on purpose — the MCP boundary validates it against
+              // LXK_PUBLIC_URL/LXK_TRUSTED_ORIGINS, so rewriting it (as /api
+              // does for Better Auth on a remote target) would defeat that
+              // check. No ws: the endpoint is stateless and never upgrades.
+              "/mcp": {
+                target: apiTarget,
+                changeOrigin: true,
+                secure: true,
+              },
             },
           }),
     },

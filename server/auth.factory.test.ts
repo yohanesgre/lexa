@@ -7,7 +7,7 @@ import { makeSignature } from "better-auth/crypto";
 import { runMigrations } from "./db/migrate";
 import { auth, createAuth, authIpLimiter, authLimiterSizes, loginLimiter, sweepAuthLimiters, handleAuthSurface } from "./auth";
 import { capabilities, capabilitiesFromRuntimeEnv, chatAttachmentsEnabled, hasSecretsMasterKey, tasksBulkEnabled } from "./capabilities";
-import { getEnv, type RuntimeEnv } from "./env";
+import { getEnv, DEFAULT_PUBLIC_URL, type RuntimeEnv } from "./env";
 
 const MIGRATIONS = fileURLToPath(new URL("../migrations", import.meta.url));
 
@@ -202,20 +202,26 @@ describe("capabilities (GET /api/capabilities)", () => {
   });
 
   it("gates assistant on the master key and the rest on their kill switches, per flavor", () => {
-    expect(capabilities("bun", {})).toEqual({ assistant: false, flavor: "bun", chatAttachments: false, tasksBulk: true });
-    expect(capabilities("bun", { LXK_SECRETS_MASTER_KEY: KEY })).toEqual({ assistant: true, flavor: "bun", chatAttachments: true, tasksBulk: true });
-    expect(capabilities("workers", {})).toEqual({ assistant: false, flavor: "workers", chatAttachments: false, tasksBulk: true });
+    const mcpUrl = `${DEFAULT_PUBLIC_URL}/mcp`;
+    expect(capabilities("bun", {})).toEqual({ assistant: false, flavor: "bun", chatAttachments: false, tasksBulk: true, mcpUrl });
+    expect(capabilities("bun", { LXK_SECRETS_MASTER_KEY: KEY })).toEqual({ assistant: true, flavor: "bun", chatAttachments: true, tasksBulk: true, mcpUrl });
+    expect(capabilities("workers", {})).toEqual({ assistant: false, flavor: "workers", chatAttachments: false, tasksBulk: true, mcpUrl });
     expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY, LXK_DISABLE_CHAT_ATTACHMENTS: "1" })).toEqual({
       assistant: true,
       flavor: "workers",
       chatAttachments: false,
       tasksBulk: true,
+      mcpUrl,
     });
     expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY, LXK_DISABLE_TASKS_BULK: "1" })).toEqual({
       assistant: true,
       flavor: "workers",
       chatAttachments: true,
       tasksBulk: false,
+      mcpUrl,
+    });
+    expect(capabilities("bun", { LXK_PUBLIC_URL: "https://lexa.example.com/" })).toMatchObject({
+      mcpUrl: "https://lexa.example.com/mcp",
     });
     const env = { LXK_SECRETS_MASTER_KEY: KEY } as RuntimeEnv;
     expect(capabilitiesFromRuntimeEnv("workers", env)).toEqual(capabilities("workers", env));
