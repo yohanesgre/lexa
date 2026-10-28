@@ -103,8 +103,9 @@ Titles come from `scripts/check-invariants.ts`; evidence is grep-verified agains
   isolation across two auth instances), `server/services/email.service.test.ts`
   (accepted vs known rejection vs unrecognized transport/internal outcome),
   and the retained
-  `server/services/workspace-invites.test.ts` reset case (single use + requester
-  session-cookie expiry).
+  `server/services/workspace-invites.test.ts` reset case (single use,
+  requester session-cookie expiry, and deactivated-target INVALID_TOKEN before
+  credential mutation).
 - **Migrations & upgrades** — `server/db/{migrate,backfills}.test.ts`,
   `server/assistant/legacy-convert.test.ts`, `cli/src/{worker-upgrade,upgrade-process}.test.ts`,
   `server/workers-entry.test.ts` (maintenance purge removes expired

@@ -196,6 +196,33 @@ describe("PasswordLinksService", () => {
     const oldSignIn = await auth.api.signInEmail({ body: { email: "legacy@lexa.dev", password: "oldpass123" } }).catch((e) => e);
     expect((oldSignIn as { status?: number }).status ?? 200).not.toBe(200);
 
+    // A token issued while active must not complete after deactivation: the
+    // before-guard rejects with the existing INVALID_TOKEN shape and does not
+    // mutate the credential or consume the token.
+    const extra = await Effect.runPromise(svc.issue(userId));
+    sqlite.prepare("UPDATE users SET banned = 1 WHERE id = ?").run(userId);
+    const bannedAttempt = await consume({ token: extra.token, newPassword: "banned123" });
+    expect(bannedAttempt.status).toBe(400);
+    expect(((await bannedAttempt.json()) as { code?: string }).code).toBe("INVALID_TOKEN");
+    const bannedViaQuery = await auth.handler(new Request(
+      `http://localhost:3000/api/auth/reset-password?token=${encodeURIComponent(extra.token)}`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newPassword: "banned123" }) }
+    ));
+    expect(bannedViaQuery.status).toBe(400);
+    const stillIssued = sqlite
+      .prepare("SELECT value FROM verification WHERE identifier = ?")
+      .get(`reset-password:${extra.token}`) as { value: string } | null;
+    expect(stillIssued?.value).toBe(userId);
+
+    // Reactivate only to prove the credential hash was untouched by the
+    // rejected attempts: the post-first-reset password still signs in and the
+    // attempted replacement does not.
+    sqlite.prepare("UPDATE users SET banned = 0 WHERE id = ?").run(userId);
+    const unchangedSignIn = await auth.api.signInEmail({ body: { email: "legacy@lexa.dev", password: "brandnew123" } });
+    expect(unchangedSignIn.user.email).toBe("legacy@lexa.dev");
+    const attemptedSignIn = await auth.api.signInEmail({ body: { email: "legacy@lexa.dev", password: "banned123" } }).catch((e) => e);
+    expect((attemptedSignIn as { status?: number }).status ?? 200).not.toBe(200);
+
     sqlite.close();
   });
 

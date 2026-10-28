@@ -968,10 +968,11 @@ export async function main(): Promise<void> {
   // before creating a fresh one (all data in it is gone).
   const RESET_DB = process.argv.includes("--reset-db");
   const NAME = flag("name") || "lexa";
-  // Optional transactional sender. A re-run without the flag keeps the prior
-  // deploy config's LXK_EMAIL_FROM (operator vars are preserved); passing it
-  // again updates the same var. No sender is invented.
-  const EMAIL_FROM = flag("email-from") || process.env.LXK_EMAIL_FROM || "";
+  // Optional transactional sender from the install environment. A re-run
+  // without LXK_EMAIL_FROM keeps the prior deploy config's value (operator
+  // vars are preserved); setting it again updates the same var. No sender is
+  // invented.
+  const EMAIL_FROM = process.env.LXK_EMAIL_FROM || "";
   const FLAVOR = resolveNames(NAME);
   const FLAVOR_NAME = NAME;
   if (NAME === "staging" || NAME === "prod") {

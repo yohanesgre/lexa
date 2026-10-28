@@ -339,7 +339,8 @@ in message bodies; logs carry only outcome/category.
 
 **Deployment custody.** The root config, staging template, installer
 (`scripts/lib/cf-deploy.ts`), and `lx worker upgrade` carry the binding;
-`--email-from` / `LXK_EMAIL_FROM` writes the sender and later re-runs/upgrades
+`LXK_EMAIL_FROM` in the install environment writes the sender and later
+re-runs/upgrades
 preserve it. A boot warning reports a partial config. Local `wrangler dev`
 simulates the binding: sends are logged, not delivered, so local success is
 **not** delivery evidence. Real sender-domain onboarding, SPF/DKIM/DMARC,

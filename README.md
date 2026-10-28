@@ -170,7 +170,7 @@ is the one tracked exception):
 |---|---|
 | Local dev (`.env.toml`) | `bun run setup` writes it and records `LXK_ADMIN_EMAILS`; API keys minted post-setup; GitHub sync configured in the web app |
 | Self-hosted (install script) | the script writes `cf-workers/.env.toml` (0600) as custody for `LXK_SECRETS_MASTER_KEY` and pushes it to the Worker as a secret; D1/R2/KV are provisioned under `--name`. API keys minted post-setup (login → Settings → API Keys); the master key is preserved across re-runs |
-| Transactional email (optional, Workers only) | Cloudflare Email Sending (Beta) requires domain onboarding first. Pass `--email-from <verified-sender>` (or `LXK_EMAIL_FROM`) at install; the deploy config carries the native `EMAIL` binding and the sender, preserved on re-runs/upgrades. Without it, email is off and links stay copy-only. Local `wrangler dev` only simulates sends; inbox delivery is a manual rollout check |
+| Transactional email (optional, Workers only) | Cloudflare Email Sending (Beta) requires domain onboarding first. Set `LXK_EMAIL_FROM=<verified-sender>` in the install environment; the deploy config carries the native `EMAIL` binding and the sender, preserved on re-runs/upgrades. Without it, email is off and links stay copy-only. Local `wrangler dev` only simulates sends; inbox delivery is a manual rollout check |
 | Optional | `LXK_ASSISTANT_REPO_CAP` (Workers-only assistant repo-grounding cap, default 3), `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation

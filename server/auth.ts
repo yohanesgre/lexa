@@ -335,6 +335,15 @@ function nativeResetSucceeded(returned: unknown): boolean {
   return typeof returned === "object" && returned !== null && "status" in returned && returned.status === true;
 }
 
+function hasDeactivatedFlag(user: unknown): boolean {
+  return (
+    typeof user === "object" &&
+    user !== null &&
+    "banned" in user &&
+    (user.banned === true || user.banned === 1)
+  );
+}
+
 export function buildAuthOptions(env: RuntimeEnv) {
   const publicUrl = resolvePublicUrl(env);
   const databasePath = resolveDatabasePath(env);
@@ -464,6 +473,26 @@ export function buildAuthOptions(env: RuntimeEnv) {
       ...(env.DB ? [] : [tanstackStartCookies()]),
     ],
     hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/reset-password") return;
+        // Match native precedence exactly: body.token first, then query.token.
+        // A truthy non-string body token falls through to native validation,
+        // never to the query fallback.
+        const bodyToken =
+          typeof ctx.body === "object" && ctx.body !== null && "token" in ctx.body ? ctx.body.token : undefined;
+        const token = bodyToken || ctx.query?.token;
+        if (typeof token !== "string" || token.length === 0) return;
+        const verification = await ctx.context.internalAdapter.findVerificationValue(`reset-password:${token}`);
+        if (!verification) return;
+        const user = await ctx.context.internalAdapter.findUserById(verification.value);
+        // Deactivated or missing target: same 400 INVALID_TOKEN shape as an
+        // invalid/used/expired token, before credential mutation or session
+        // deletion. Active targets, expired tokens and unknown tokens fall
+        // through to native behavior unchanged.
+        if (!user || hasDeactivatedFlag(user)) {
+          throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
+        }
+      }),
       after: createAuthMiddleware(async (ctx) => {
         if (ctx.path !== "/reset-password" || !nativeResetSucceeded(ctx.context.returned)) return;
         // Native reset deletes the target user's DB sessions but leaves the

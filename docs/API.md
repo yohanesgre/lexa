@@ -1614,7 +1614,10 @@ body { email* }        (JSON only; no redirect/recipient/sender/template overrid
 POST   /api/auth/reset-password
 body { token*, newPassword* }
 → 200 { status: true } | 400 INVALID_TOKEN / PASSWORD_TOO_SHORT / PASSWORD_TOO_LONG
-  Single use; expired/used/revoked tokens reject. A successful reset changes
+  Single use; expired/used/revoked tokens reject. A token issued while the
+  account was active is rejected with the same 400 `INVALID_TOKEN` if the
+  target is later deactivated or missing; the guard runs before any credential
+  mutation and does not consume the token. A successful reset changes
   only the token's account, revokes existing sessions through the canonical
   auth policy, expires the requester's own `better-auth.session_token` /
   `session_data` cookies in that response, never logs in automatically, never

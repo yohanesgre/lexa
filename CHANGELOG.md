@@ -30,7 +30,8 @@ All notable changes to Lexa are documented here. Format based on
   `invite` and an `email` outcome (`accepted | failed | unknown |
   not_configured`, `messageId?`); a failed/unknown submission preserves the
   authoritative link and is never replayed. The root/staging Wrangler configs,
-  installer (`--email-from` / `LXK_EMAIL_FROM`), and `lx worker upgrade` carry
+  installer (`LXK_EMAIL_FROM` in the install environment), and
+  `lx worker upgrade` carry
   and preserve the binding + sender. Email Sending is Beta and acceptance is
   not inbox delivery: actual quota, SPF/DKIM/DMARC, and Gmail/Outlook receipt
   are manual rollout checks, and local `wrangler dev` only simulates sends.

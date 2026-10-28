@@ -651,7 +651,10 @@ configured the native router path is also in `disabledPaths`, failing alternate
 HTTP variants closed. A D1 admission-store failure preserves the failure and
 returns the generic 500 `INTERNAL`, never a throttling response. The token is
 consumed only by the native `POST /api/auth/reset-password` (password policy,
-single use, session revocation, no auto-login). A successful reset also expires
+single use, session revocation, no auto-login). A same-instance before-hook
+rejects a token whose target account is deactivated or missing with the
+existing 400 `INVALID_TOKEN` before credential mutation, while active/expired/
+unknown tokens keep native semantics. A successful reset also expires
 the requester's own signed session cookies through the native
 `deleteSessionCookie` after-hook, so that browser must sign in again; copied or
 other pre-reset sessions keep the documented <=300s cookie-cache window.
