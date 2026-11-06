@@ -195,6 +195,14 @@ export default defineConfig(async ({ command }) => {
           codeSplitting: {
             groups: [
               {
+                // Better Auth (zod v3) and the AI SDK (zod v4) would otherwise
+                // be absorbed into vendor-tanstack / vendor-assistant, pulling
+                // the whole framework graph into auth — and thus the core API.
+                name: "vendor-zod",
+                test: /node_modules[\\/](?:zod|zod-to-json-schema)[\\/]/,
+                priority: 30,
+              },
+              {
                 name: "vendor-react",
                 test: /node_modules[\\/](react|react-dom|scheduler|use-sync-external-store)[\\/]/,
                 priority: 20,
@@ -208,6 +216,22 @@ export default defineConfig(async ({ command }) => {
                 name: "vendor-assistant",
                 test: /node_modules[\\/](partysocket|@ai-sdk|@cloudflare[\\/]ai-chat|@tanstack[\\/]ai|ai)[\\/]/,
                 priority: 12,
+              },
+              {
+                // Parser-only markdown modules, priority above the React
+                // renderer so react.js imports this chunk instead of pulling
+                // parser/inline/utils into its own React-bearing chunk.
+                name: "vendor-markdown-parser",
+                test: /node_modules[\\/]@tanstack[\\/]markdown[\\/]dist[\\/](?:parser|inline|utils|html)\.js$/,
+                priority: 14,
+              },
+              {
+                // The React renderer is the only @tanstack/markdown module
+                // that imports React. Separate it from the parser chunk so a
+                // server-only markdownToText() caller does not evaluate React.
+                name: "vendor-markdown-react",
+                test: /node_modules[\\/]@tanstack[\\/]markdown[\\/]dist[\\/]react\.js$/,
+                priority: 13,
               },
               {
                 name: "vendor-markdown",

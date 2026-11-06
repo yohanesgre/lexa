@@ -16,7 +16,7 @@ All notable changes to Lexa are documented here. Format based on
 
 ### Changed
 
-- **Leaner Workers cold start.** The Worker upload drops from 153 to 59
+- **Leaner Workers cold start.** The Worker upload drops from 153 to 62
   modules (13.7 MB to 11.2 MB) with the entry still ~28 KB: non-assistant
   `/api/*` requests use a base-only handler and never link the assistant AI
   graph; CodeMirror and dnd-kit resolve to inert SSR shims (the browser keeps
