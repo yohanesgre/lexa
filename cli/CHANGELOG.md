@@ -12,6 +12,15 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.7.1] - 2026-11-06
+
+### Fixed
+
+- **`worker upgrade` keeps placement.** The rebuilt deploy config now carries
+  `placement` from the release's root `wrangler.jsonc` (falling back to the
+  prior deploy config), so a Jakarta or other placement hint survives an
+  upgrade instead of being dropped from the generated `wrangler.lexa.json`.
+
 ## [2026.7.0] - 2026-10-22
 
 ### Changed
