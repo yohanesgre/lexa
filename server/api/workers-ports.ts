@@ -204,6 +204,20 @@ export function stringEnvFromRuntimeEnv(env: RuntimeEnv): Record<string, string 
 }
 
 // ─── Env → settings-DB bootstrap mirror (async) ───────────────────────────
+// The mirrored pairs: env only provisions first boot, and only while the DB
+// key is absent/empty.
+const SETTINGS_ENV_MIRROR = [
+  { key: "rate_limit_max", envKey: "LXK_RATE_LIMIT_MAX" },
+  { key: "rate_limit_window_ms", envKey: "LXK_RATE_LIMIT_WINDOW_MS" },
+  { key: "assistant_repo_cap", envKey: "LXK_ASSISTANT_REPO_CAP" },
+] as const;
+
+// True when the env still carries a provisioning value, i.e. the mirror has
+// work to do. Boot skips the mirror's reads entirely when nothing is set.
+export function hasEnvMirrorCandidates(env: Record<string, string | undefined>): boolean {
+  return SETTINGS_ENV_MIRROR.some(({ envKey }) => (env[envKey] ?? "").trim() !== "");
+}
+
 // Same semantics as mirrorSettingsFromEnv in server/db/settings.ts: the DB
 // is the single source of truth at runtime; env only provisions first boot.
 // Each mapping is written when the DB key is absent/empty AND the env value
@@ -230,9 +244,9 @@ export function mirrorSettingsFromEnvAsync(
       );
     };
 
-    yield* mirror("rate_limit_max", env.LXK_RATE_LIMIT_MAX);
-    yield* mirror("rate_limit_window_ms", env.LXK_RATE_LIMIT_WINDOW_MS);
-    yield* mirror("assistant_repo_cap", env.LXK_ASSISTANT_REPO_CAP);
+    for (const { key, envKey } of SETTINGS_ENV_MIRROR) {
+      yield* mirror(key, env[envKey]);
+    }
     return mirrored;
   });
 }

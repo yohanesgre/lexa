@@ -660,6 +660,7 @@ CREATE TABLE github_app_secrets (
 -- Board fetch = WHERE project_id=? ORDER BY column, position → one index.
 CREATE INDEX idx_tasks_board     ON tasks(project_id, column_id, position);
 CREATE INDEX idx_tasks_swimlane  ON tasks(project_id, swimlane_id);
+CREATE INDEX idx_tasks_key       ON tasks(key);                                    -- PREFIX-n route lookup
 CREATE UNIQUE INDEX idx_tasks_position ON tasks(column_id, position);              -- fractional-index integrity
 CREATE UNIQUE INDEX idx_task_github_issues_issue ON task_github_issues(issue_id);  -- issue → at most one task
 CREATE INDEX idx_columns_project ON columns(project_id, position);

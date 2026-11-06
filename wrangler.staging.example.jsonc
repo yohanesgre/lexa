@@ -42,6 +42,12 @@
   "main": "./dist/server/index.js",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Same rationale as the root config: D1's primary is remote to the visitor's
+  // colo, so placement collapses the per-query RTT chain. Fetch only — the
+  // scheduled tick is unaffected.
+  "placement": {
+    "mode": "smart"
+  },
   "ai": {
     "binding": "AI"
   },

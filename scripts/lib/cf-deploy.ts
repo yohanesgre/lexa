@@ -381,6 +381,9 @@ export interface RootWorkerConfig {
   compatibility_date?: string;
   observability?: Record<string, unknown>;
   triggers?: Record<string, unknown>;
+  // Smart Placement / placement hints, carried verbatim into the per-deploy
+  // config so `lexa-cli` and installer deploys keep the root setting.
+  placement?: Record<string, unknown>;
   ai?: { binding: string; dev?: Record<string, unknown> };
   // Native Email Sending binding declaration, carried verbatim into the
   // per-deploy config. The sender stays a var (LXK_EMAIL_FROM).
@@ -954,6 +957,9 @@ export function buildDeployConfig(
     ...(rootConfig.send_email !== undefined ? { send_email: rootConfig.send_email } : {}),
     // Scheduled tick carried verbatim from root (prune + R2 backup retention).
     ...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {}),
+    // Placement carried verbatim from root: the Worker's D1 primary is not in
+    // the visitor's colo, so smart placement removes the per-query RTT chain.
+    ...(rootConfig.placement !== undefined ? { placement: rootConfig.placement } : {}),
     observability: resolveObservability(rootConfig),
   };
 }
