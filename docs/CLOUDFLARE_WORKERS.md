@@ -700,6 +700,13 @@ A dry run prints `Release`, `Latest` (with current), `Checksum`, and
    `import()`, and the exported `LexaChatSupervisor` DO class must not statically
    import the assistant layer. A new top-level import in either module
    re-inflates every isolate, including cron ticks that only run three DELETEs.
+   Non-assistant `/api/*` requests use `createCoreApiHandler`
+   (`server/api/core-api.ts`); only the assistant prefixes listed in
+   `workers-entry.ts` link `assistant-api.ts`. Browser-only CodeMirror and
+   dnd-kit imports are redirected to `server/workers-shims/*-ssr.ts` in the
+   `ssr` environment only (the client build keeps the real packages), and the
+   SSR build merges `/app/routes` + `/app/components` behind Start's lazy
+   router import. Preserve those boundaries when adding imports.
 
 ## Bottom line
 

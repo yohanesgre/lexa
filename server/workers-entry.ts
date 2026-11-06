@@ -266,12 +266,28 @@ type BetterAuthApi = {
   $context?: Promise<unknown>;
 };
 
-// The full API stack (better-auth + service graph + web handler) is
+// The API stacks (better-auth + service graph + web handler) are
 // isolate-stable: bindings and env vars don't change within an isolate.
-// Rebuilding it per request costs tens of ms of CPU — far over the free
-// plan's 10ms budget. Cache on first build; a changed env fingerprint
-// (redeploy/new isolate) rebuilds once.
-let apiCache: { fingerprint: string; handler: (req: Request) => Promise<Response> } | null = null;
+// Rebuilding one per request costs tens of ms of CPU — far over the free
+// plan's 10ms budget. Cache each stack on first build; a changed env
+// fingerprint (redeploy/new isolate) rebuilds once. Core and assistant are
+// separate caches so a board/wiki request never links the assistant AI graph.
+type CachedApiHandler = { fingerprint: string; handler: (req: Request) => Promise<Response> };
+
+let coreApiCache: CachedApiHandler | null = null;
+let assistantApiCache: CachedApiHandler | null = null;
+
+// Assistant tier groups: /assistant/* (assistant, assistantMcp, assistantJev,
+// assistantSchedules), /admin/assistant/* (adminAssistant), and
+// /projects/:id/assistant/* (projectAssistantUsage, project Jev, project MCP).
+const ASSISTANT_PATH_PREFIXES = ["/api/assistant/", "/api/admin/assistant/"];
+
+export function isAssistantApiPath(pathname: string): boolean {
+  if (ASSISTANT_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
+  // Only the segment immediately after the project id is the assistant tier.
+  // A later /assistant/ inside a base document path must stay on core.
+  return /^\/api\/projects\/[^/]+\/assistant(?:\/|$)/.test(pathname);
+}
 
 function apiFingerprint(runtimeEnv: RuntimeEnv): string {
   return JSON.stringify([
@@ -342,26 +358,36 @@ async function handleApi(
   blob: R2Bucket | undefined
 ): Promise<Response> {
   const fingerprint = apiFingerprint(runtimeEnv);
-  if (!apiCache || apiCache.fingerprint !== fingerprint) {
-    const lexaAuth = await getRuntimeAuth(runtimeEnv);
-    // Static import would put the whole API/assistant graph back in every
-    // isolate's eager graph — the exact cost this entry split removes.
-    const { createWorkersApiHandler } = await import("./api/assistant-api");
-    const handler = createWorkersApiHandler({
-      driver,
-      runtimeEnv,
-      storage: r2StorageConfig(runtimeEnv, blob as unknown as NarrowR2Bucket | undefined),
-      authHooks: {
-        createUser: (input) =>
-          lexaAuth.auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
-        listSessions: (headers) => lexaAuth.auth.api.listSessions({ headers }),
-        revokeSession: ({ token, headers }) => lexaAuth.auth.api.revokeSession({ body: { token }, headers }),
-      },
-      getSession: (headers) => lexaAuth.auth.api.getSession({ headers }),
-    });
-    apiCache = { fingerprint, handler };
+  const assistant = isAssistantApiPath(new URL(req.url).pathname);
+  const cached = assistant ? assistantApiCache : coreApiCache;
+  if (cached && cached.fingerprint === fingerprint) {
+    return cached.handler(req as unknown as Request);
   }
-  return apiCache.handler(req as unknown as Request);
+  const lexaAuth = await getRuntimeAuth(runtimeEnv);
+  const options = {
+    driver,
+    runtimeEnv,
+    storage: r2StorageConfig(runtimeEnv, blob as unknown as NarrowR2Bucket | undefined),
+    authHooks: {
+      createUser: (input: { email: string; password: string; name: string }) =>
+        lexaAuth.auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
+      listSessions: (headers: Headers) => lexaAuth.auth.api.listSessions({ headers }),
+      revokeSession: ({ token, headers }: { token: string; headers: Headers }) => lexaAuth.auth.api.revokeSession({ body: { token }, headers }),
+    },
+    getSession: (headers: Headers) => lexaAuth.auth.api.getSession({ headers }),
+  };
+  // Static imports would put the whole API graph back in every isolate's
+  // eager graph — the exact cost this entry split removes.
+  if (assistant) {
+    const { createWorkersApiHandler } = await import("./api/assistant-api");
+    const handler = createWorkersApiHandler(options);
+    assistantApiCache = { fingerprint, handler };
+    return handler(req as unknown as Request);
+  }
+  const { createCoreApiHandler } = await import("./api/core-api");
+  const handler = createCoreApiHandler(options);
+  coreApiCache = { fingerprint, handler };
+  return handler(req as unknown as Request);
 }
 
 

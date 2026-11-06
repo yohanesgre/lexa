@@ -1,30 +1,15 @@
-import type { Tiktoken } from "js-tiktoken/lite";
-
-let encoderPromise: Promise<Tiktoken> | null = null;
-let loadWarned = false;
-
-function loadEncoder(): Promise<Tiktoken> {
-  encoderPromise ??= (async () => {
-    const { Tiktoken } = await import("js-tiktoken/lite");
-    const { default: cl100kBaseRanks } = await import("js-tiktoken/ranks/cl100k_base");
-    return new Tiktoken(cl100kBaseRanks);
-  })().catch((err: unknown) => {
-    encoderPromise = null;
-    throw err;
-  });
-  return encoderPromise;
-}
+// Heuristic token estimate for the cost log's missing-usage fallback. This is
+// never authoritative: the provider's usage wins whenever it reports one, and
+// the caller keeps the `estimated` flag. `tokenx` is a zero-dependency,
+// synchronous estimator, so it adds a few kB instead of the 1.07 MB encoder
+// ranks chunk `js-tiktoken` needed.
+import { estimateTokenCount } from "tokenx";
 
 export async function estimateTokens(text: string): Promise<number> {
   if (!text) return 0;
   try {
-    const enc = await loadEncoder();
-    return enc.encode(text).length;
-  } catch (err) {
-    if (!loadWarned) {
-      loadWarned = true;
-      console.warn("[tiktoken] token estimate failed; cost estimates fall back to chars/4", err);
-    }
-    return 0; // 0 = unknown; the caller estimates from text length
+    return estimateTokenCount(text);
+  } catch {
+    return 0; // 0 = unknown; the caller estimates from text length (chars/4)
   }
 }

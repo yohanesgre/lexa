@@ -41,7 +41,20 @@ export interface SignInResponse {
 
 const AUTH_BASE = "/api/auth";
 
-async function fetchSessionClient(): Promise<SessionResponse> {
+// Root beforeLoad and useAuthBounce both ask for the session on load/navigation
+// (and useSession may join them), so a short in-flight/TTL window shares one
+// GET /api/auth/get-session. Auth mutations clear it before and after their
+// request, so a sign-in/out is never observed through a stale pre- or
+// in-flight-mutation response. The TanStack Query cache is deliberately
+// untouched.
+const SESSION_FETCH_TTL_MS = 1500;
+let sessionFetch: { at: number; promise: Promise<SessionResponse> } | null = null;
+
+function clearSessionFetch(): void {
+  sessionFetch = null;
+}
+
+async function requestSession(): Promise<SessionResponse> {
   try {
     const res = await fetch(`${AUTH_BASE}/get-session`, { credentials: "include" });
     if (!res.ok) return { session: null, user: null };
@@ -52,6 +65,14 @@ async function fetchSessionClient(): Promise<SessionResponse> {
   } catch {
     return { session: null, user: null };
   }
+}
+
+export function fetchSessionClient(): Promise<SessionResponse> {
+  const now = Date.now();
+  if (sessionFetch && now - sessionFetch.at < SESSION_FETCH_TTL_MS) return sessionFetch.promise;
+  const promise = requestSession();
+  sessionFetch = { at: now, promise };
+  return promise;
 }
 
 // SSR cookie forwarding lives in auth-session.server.ts (server-only module);
@@ -84,24 +105,34 @@ interface AuthErrorPayload {
 }
 
 async function authRequest(path: string, body: unknown): Promise<unknown> {
-  const res = await fetch(`${AUTH_BASE}${path}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as AuthErrorPayload;
-    const envelope = typeof data.error === "object" && data.error !== null ? data.error : undefined;
-    const legacyMessage = typeof data.error === "string" ? data.error : undefined;
-    const err = new Error(data.message ?? envelope?.message ?? legacyMessage ?? `HTTP ${res.status}`) as Error & { code?: string; status?: number };
-    const code = data.code ?? envelope?.code ?? legacyMessage;
-    if (code !== undefined) err.code = code;
-    err.status = res.status;
-    throw err;
+  // Any auth mutation changes the session surface; the next get-session must
+  // observe the post-mutation cookie, never a pre-mutation cached response.
+  // Clear before the request and again after it: a get-session racing the
+  // mutation can cache its in-window result, which is stale once the cookie
+  // (and possibly the session row) changed.
+  clearSessionFetch();
+  try {
+    const res = await fetch(`${AUTH_BASE}${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as AuthErrorPayload;
+      const envelope = typeof data.error === "object" && data.error !== null ? data.error : undefined;
+      const legacyMessage = typeof data.error === "string" ? data.error : undefined;
+      const err = new Error(data.message ?? envelope?.message ?? legacyMessage ?? `HTTP ${res.status}`) as Error & { code?: string; status?: number };
+      const code = data.code ?? envelope?.code ?? legacyMessage;
+      if (code !== undefined) err.code = code;
+      err.status = res.status;
+      throw err;
+    }
+    if (res.status === 204) return undefined;
+    return res.json();
+  } finally {
+    clearSessionFetch();
   }
-  if (res.status === 204) return undefined;
-  return res.json();
 }
 
 export function signInEmail(input: { email: string; password: string }): Promise<SignInResponse> {

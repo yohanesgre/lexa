@@ -12,6 +12,7 @@ import { createD1Driver } from "../db/drivers/d1";
 import { batch, batchResults, queryFirst, run, type DbDriver } from "../db/db";
 import { BatchTimeout, ConstraintViolation } from "../db/driver";
 import { createWorkersApiHandler } from "./assistant-api";
+import { createCoreApiHandler } from "./core-api";
 import type { StorageConfigShape } from "../storage/config";
 import type { ApiAuthHooksShape } from "./auth-hooks";
 import { resolveApiKeyIdentityAsync } from "./auth-key";
@@ -266,7 +267,7 @@ const SESSION_B = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
-function buildWorkersHandler() {
+function buildWorkersHandler(factory: typeof createWorkersApiHandler = createWorkersApiHandler) {
   const db = new Database(":memory:");
   // The middleware re-reads `users.role` per session request; seed the minimal
   // row so the injected session identity resolves (a missing row → 401).
@@ -285,18 +286,43 @@ function buildWorkersHandler() {
     listSessions,
     revokeSession,
   };
-  const handler = createWorkersApiHandler({
-    driver: createBunSqliteDriver(db),
+  const driver = createBunSqliteDriver(db);
+  const handler = factory({
+    driver,
     runtimeEnv: { LXK_ENV: "dev" },
     storage,
     authHooks,
     getSession: async () => ({ user: { id: "u1", name: "Test", role: "member" } }),
   });
-  return { handler, listSessions, revokeSession, fsRoot, db };
+  return { handler, driver, listSessions, revokeSession, fsRoot, db };
 }
 
 const callWorkers = (handler: (req: Request) => Promise<Response>, method: string, path: string) =>
   handler(new Request(`http://lexa.test${path}`, { method, headers: { cookie: "better-auth.session_token=fake" } }));
+
+describe("core API handler split", () => {
+  it("serves base route groups, leaves assistant routes unmounted, and checks readiness once", async () => {
+    const { handler, driver, fsRoot, db } = buildWorkersHandler(createCoreApiHandler);
+    try {
+      let readinessChecks = 0;
+      const prepare = driver.prepare.bind(driver);
+      driver.prepare = ((sql: string) => {
+        if (sql.includes("FROM settings WHERE key = ?")) readinessChecks += 1;
+        return prepare(sql);
+      }) as typeof driver.prepare;
+
+      const sessions = await callWorkers(handler, "GET", "/api/sessions");
+      expect(sessions.status).toBe(200);
+
+      const assistant = await callWorkers(handler, "GET", "/api/assistant/schedules/p1");
+      expect(assistant.status).toBe(404);
+      expect(readinessChecks).toBe(1);
+    } finally {
+      rmSync(fsRoot, { recursive: true, force: true });
+      db.close();
+    }
+  });
+});
 
 describe("workers sessions via auth hooks", () => {
   it("lists through the injected hooks sorted desc, resolves a revoke id → token, and 404s an unknown id", async () => {

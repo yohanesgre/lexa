@@ -31,6 +31,7 @@ import {
   VisionNotConfigured,
 } from "./errors";
 import { respond } from "./http-helpers";
+import { createMarkdownReadinessGate, isMarkdownReadinessExemptPath } from "./markdown-readiness";
 import { AuthIdentity } from "./auth";
 import { auth } from "../auth";
 import { createApiMiddleware, type MiddlewareSession } from "./middleware";
@@ -1378,13 +1379,6 @@ export interface WorkersApiHandlerOptions {
   mcpConnector?: Layer.Layer<McpConnector> | undefined;
 }
 
-const isMarkdownReadinessExemptPath = (pathname: string): boolean =>
-  pathname === "/health" || pathname === "/api/health" ||
-  pathname === "/setup" || pathname.startsWith("/setup/") ||
-  pathname === "/api/setup" || pathname.startsWith("/api/setup/") ||
-  pathname === "/auth" || pathname.startsWith("/auth/") ||
-  pathname === "/api/auth" || pathname.startsWith("/api/auth/");
-
 export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
   const { driver, runtimeEnv, storage, authHooks } = opts;
   const dbLayer = Layer.mergeAll(
@@ -1406,10 +1400,11 @@ export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
     createWorkersApiMiddleware(driver, runtimeEnv, storage, { getSession: opts.getSession })
   );
   const { handler } = HttpApiBuilder.toWebHandler(finalLayer as never);
+  const assertReady = createMarkdownReadinessGate(driver);
   return async (req: Request) => {
     if (!isMarkdownReadinessExemptPath(new URL(req.url).pathname)) {
       try {
-        await Effect.runPromise(assertMarkdownReady(driver));
+        await assertReady();
       } catch {
         return new Response(JSON.stringify({ error: { code: "INTERNAL", message: "Internal error" } }), { status: 500, headers: { "Content-Type": "application/json" } });
       }
