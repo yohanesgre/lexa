@@ -98,8 +98,11 @@ describe("Bun bundle boundary (ADR-0005 D7/W6)", () => {
   it("Workers entry eagerly reaches no DO package (ADR-0005 W6: the DO executor is gone)", () => {
     const forbidden = [...workers.bare].filter((s) => FORBIDDEN.some((re) => re.test(s)));
     expect(forbidden).toEqual([]);
-    // Non-vacuous: the Workers entry still walks a substantial graph.
-    expect(workers.files.size).toBeGreaterThan(50);
+    // Non-vacuous: the entry still walks its binding/driver/boot modules. The
+    // API, assistant, auth, MCP, and GitHub graphs are lazy `import()` chunks
+    // by design (they were the 100+ MB eager baseline), so this graph is
+    // intentionally small — keep the floor above zero, not at the old size.
+    expect(workers.files.size).toBeGreaterThan(10);
   });
 
   it("Workers entry eagerly reaches no DO module (agent / runner / model-factory deleted)", () => {

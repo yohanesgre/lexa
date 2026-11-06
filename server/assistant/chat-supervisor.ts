@@ -27,13 +27,18 @@ import { Db, type DbDriver } from "../db/db";
 import { createD1Driver } from "../db/drivers/d1";
 import { d1DatabaseToD1Like } from "../api/workers-ports";
 import { assertMarkdownReady } from "../db/document-format";
-import { assistantServiceLayerWithStorage } from "../api/assistant-api";
-import { buildBaseServiceLayerWithStorage } from "../api/http";
 import { LoggerLayer } from "../logging/logger";
 import { r2StorageConfig, type R2Bucket as NarrowR2Bucket } from "../storage/config";
-import { AssistantChatService } from "../services/assistant-chat.service";
+import type * as AssistantChatModule from "../services/assistant-chat.service";
+
+type AssistantChatServiceTag = typeof AssistantChatModule.AssistantChatService;
 import { errorResponse, errorToStatus } from "../api/errors";
 import type { AssistantChatStreamRequest, StreamFrame } from "../../shared/assistant";
+
+// The DO module is re-exported by the Worker entry, so its static imports are
+// evaluated by EVERY isolate (cron, health, shell). Keep it light: the base
+// API + assistant service layers are loaded only when a supervised turn
+// actually runs — `wrangler` needs the class export eagerly, not its engine.
 
 export interface ChatSupervisorEnv extends Record<string, unknown> {
   DB?: D1Database;
@@ -67,10 +72,15 @@ const JSON_HEADERS = { "content-type": "application/json" } as const;
 
 /** The same layer the Worker request path composes — see
  *  `server/api/assistant-api.ts` `createWorkersApiHandler`. Built per turn, as
- *  the Worker builds it per request. */
-function buildAssistantLayer(driver: DbDriver, env: RuntimeEnv) {
+ *  the Worker builds it per request. Dynamic so the DO module's eager graph
+ *  stays free of the base API + assistant stacks (see the note above). */
+async function buildAssistantLayer(driver: DbDriver, env: RuntimeEnv) {
   // Workers storage shape (R2 binding) — the same one the Worker entry hands the
   // API handler, so attachments and image loads inside a turn resolve alike.
+  const [{ assistantServiceLayerWithStorage }, { buildBaseServiceLayerWithStorage }] = await Promise.all([
+    import("../api/assistant-api"),
+    import("../api/http"),
+  ]);
   const cfg = r2StorageConfig(env, env.BLOB as unknown as NarrowR2Bucket | undefined);
   return Layer.mergeAll(
     buildBaseServiceLayerWithStorage(cfg),
@@ -99,14 +109,25 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
   #runtimeEnv: RuntimeEnv | null = null;
   #driver: DbDriver | null = null;
 
-  #runEffect<A, E>(effect: Effect.Effect<A, E, AssistantChatService>, signal: AbortSignal): Promise<A> {
+  async #runEffect<A, E>(
+    build: (
+      service: AssistantChatServiceTag
+    ) => Effect.Effect<A, E, AssistantChatModule.AssistantChatService>,
+    signal: AbortSignal,
+  ): Promise<A> {
     const env = (this.#runtimeEnv ??= getEnvFromWorkers(this.env));
-    if (!env.DB) return Promise.reject(new Error("LexaChatSupervisor requires the DB (D1) binding"));
-    this.#driver ??= createD1Driver(d1DatabaseToD1Like(env.DB));
-    return Effect.runPromise(Effect.either(Effect.provide(effect, buildAssistantLayer(this.#driver, env))), { signal }).then((result) => {
-      if (Either.isLeft(result)) throw result.left;
-      return result.right;
-    });
+    if (!env.DB) throw new Error("LexaChatSupervisor requires the DB (D1) binding");
+    const driver = (this.#driver ??= createD1Driver(d1DatabaseToD1Like(env.DB)));
+    const [{ AssistantChatService }, layer] = await Promise.all([
+      import("../services/assistant-chat.service"),
+      buildAssistantLayer(driver, env),
+    ]);
+    const result = await Effect.runPromise(
+      Effect.either(Effect.provide(build(AssistantChatService), layer)),
+      { signal }
+    );
+    if (Either.isLeft(result)) throw result.left;
+    return result.right;
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -190,7 +211,7 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
     let stream: ReadableStream<StreamFrame>;
     try {
       const startup = this.#runEffect(
-        Effect.gen(function* () {
+        (AssistantChatService) => Effect.gen(function* () {
           const service = yield* AssistantChatService;
           const frames = yield* service.runChatStream(payload.chatId, payload.userId, payload.request);
           run.producerAbort = service.activeChats.get(payload.chatId) ?? null;
