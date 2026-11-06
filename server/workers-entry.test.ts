@@ -228,7 +228,7 @@ describe("per-isolate caches", () => {
     LXK_SECRETS_MASTER_KEY: Buffer.from("workers-entry-test-master-key-0000").toString("base64"),
   });
 
-  it("caches request layers + runtime auth per fingerprint and rebuilds on reset or fingerprint change", () => {
+  it("caches request layers + runtime auth per fingerprint and rebuilds on reset or fingerprint change", async () => {
     resetRequestLayersCache();
     const first = requestLayers(env());
     expect(requestLayers(env())).toBe(first);
@@ -245,9 +245,9 @@ describe("per-isolate caches", () => {
 
     resetAuthCache();
     const runtimeEnv = getEnvFromWorkers(env() as unknown as Record<string, unknown>);
-    const runtimeAuth = getRuntimeAuth(runtimeEnv);
-    expect(getRuntimeAuth(runtimeEnv)).toBe(runtimeAuth);
-    expect(getRuntimeAuth({ ...runtimeEnv, LXK_ENV: "prod" })).not.toBe(runtimeAuth);
+    const runtimeAuth = await getRuntimeAuth(runtimeEnv);
+    expect(await getRuntimeAuth(runtimeEnv)).toBe(runtimeAuth);
+    expect(await getRuntimeAuth({ ...runtimeEnv, LXK_ENV: "prod" })).not.toBe(runtimeAuth);
   });
 });
 

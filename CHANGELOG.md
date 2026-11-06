@@ -7,6 +7,16 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Leaner Workers cold start and isolate memory.** The Workers entry now loads
+  the base API, assistant/AI SDK, better-auth, MCP, and GitHub graphs through
+  dynamic `import()` — only the route class that needs them pays for them — and
+  the chat supervisor's Durable Object no longer pulls the assistant layer into
+  the eager graph. The built entry drops from ~863 KB to ~27 KB; cron ticks and
+  shell responses no longer evaluate the API graph. Request behavior is
+  unchanged.
+
 ## [2026.14.1] - 2026-11-06
 
 ### Changed

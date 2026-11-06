@@ -46,7 +46,7 @@ import type {
 import { getEnvFromWorkers, legacyGithubEnvVars, resolvePublicUrl, resolveTrustedProxyCidrs, type RuntimeEnv } from "./env";
 import type { ManagedMarkdownBinding } from "./document-conversion";
 import { RuntimeEnvLive, RuntimeEnvTag } from "./runtime-env";
-import { Db, DbD1Live, batch as batchStmts, queryFirst, run } from "./db/db";
+import { Db, DbD1Live, batch as batchStmts, queryFirst } from "./db/db";
 import { createD1Driver } from "./db/drivers/d1";
 import { assertMarkdownReady } from "./db/document-format";
 import type { DbDriver } from "./db/db";
@@ -56,21 +56,22 @@ import {
   mirrorSettingsFromEnvAsync,
   stringEnvFromRuntimeEnv,
 } from "./api/workers-ports";
-import { createWorkersApiHandler } from "./api/assistant-api";
-import { createAuth, handleAuthSurface } from "./auth";
 import { resolveMaxApiBody, X_LEXA_INTERNAL_MCP } from "./api/limits";
 import { resolveApiKeyIdentityAsync } from "./api/auth-key";
-import { handleMcpRequest, MCP_PATH } from "./mcp/http";
-import { createRestDispatch, type McpIdentity } from "./mcp/rest";
+import type { McpIdentity } from "./mcp/rest";
 import { syncRateLimitFromDbAsync, resolveClientIp } from "./api/rate-limit";
 import { r2StorageConfig, type R2Bucket as NarrowR2Bucket } from "./storage/config";
-import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
-import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
-import { GitHubService } from "./services/github.service";
 import { capabilitiesFromRuntimeEnv } from "./capabilities";
 import { emailDeliveryConfigured } from "./services/email.service";
-import { handlePasswordRecoveryRequest } from "./auth-recovery";
 import { sweepStaleAssistantTasks } from "./assistant/stale-runs";
+
+// The Worker entry's eager graph is evaluated by every isolate — including a
+// 15-minute cron tick that only runs three DELETEs, and every static-asset
+// shell response. Keep the heavy graphs (base API, assistant/AI SDK, better-auth,
+// MCP, GitHub) behind `import()` so they load only on the request class that
+// needs them. Measured before this split: 107 MB average / 129 MB peak isolate
+// memory, 365 ms average startup CPU, 1.39 s on cron ticks.
+const MCP_PATH = "/mcp"; // mirrors server/mcp/http.ts; kept local so the MCP SDK stays lazy
 
 export interface WorkersEnv {
   AI?: ManagedMarkdownBinding;
@@ -115,7 +116,13 @@ const WEBHOOK_BODY_CAP = 10_000_000;
 // same first-boot sequence the Bun host runs in server/entry.ts — env
 // mirror (idempotent: absent keys only), rate-limit sync, GitHub holder
 // sync. Concurrent cold-start requests share one boot promise.
-let bootPromise: Promise<void> | null = null;
+//
+// Split in two: the core pass (bindings + stale-task sweep) runs for every
+// isolate; the API pass (env mirror + holder syncs) runs only before a route
+// that consumes those holders. A cron tick therefore never loads the GitHub /
+// provider-secret modules.
+let coreBoot: Promise<void> | null = null;
+let apiBoot: Promise<void> | null = null;
 
 function buildRequestLayers(env: WorkersEnv, runtimeEnv: RuntimeEnv) {
   if (!env.DB) throw new Error("D1 binding missing — [d1_databases] not configured for this worker");
@@ -146,19 +153,45 @@ export function resetRequestLayersCache(): void {
   requestLayersCache = null;
 }
 
-function ensureBoot(env: WorkersEnv): Promise<void> {
-  if (!bootPromise) {
-    bootPromise = (async () => {
+function ensureCoreBoot(env: WorkersEnv): Promise<void> {
+  if (!coreBoot) {
+    coreBoot = (async () => {
       const legacyGithub = legacyGithubEnvVars(env as unknown as Record<string, string | undefined>);
       if (legacyGithub.length > 0) {
         console.warn(`[GitHub] legacy env config ignored (${legacyGithub.join(", ")}) — configure GitHub sync in Settings → Workspace → Integrations → GitHub Sync`);
       }
+      const { driver } = requestLayers(env);
+      // Boot-time stale assistant-task sweep (ADR-0005 §Reliability backstop):
+      // fail `assistant_tasks` rows stranded `running` by a crash/eviction so
+      // reset/resume is never blocked. Fire-and-forget — never blocks boot.
+      void Effect.runPromise(sweepStaleAssistantTasks(driver))
+        .then(({ failed }) => {
+          if (failed > 0) console.log(`[Assistant] failed ${failed} stale running task(s)`);
+        })
+        .catch((e) => console.error("[Assistant] stale-task sweep failed:", e instanceof Error ? e.message : String(e)));
+    })().catch((e) => {
+      console.error("[Workers] boot failed:", e instanceof Error ? e.message : String(e));
+    });
+  }
+  return coreBoot;
+}
+
+function ensureApiBoot(env: WorkersEnv): Promise<void> {
+  if (!apiBoot) {
+    apiBoot = (async () => {
+      await ensureCoreBoot(env);
       const { runtimeEnv, driver } = requestLayers(env);
       if (runtimeEnv.EMAIL !== undefined && !emailDeliveryConfigured(runtimeEnv)) {
         console.warn(
           "[Email] EMAIL binding is configured but LXK_EMAIL_FROM / LXK_PUBLIC_URL is missing, invalid, or not HTTPS — email delivery is disabled"
         );
       }
+      // Lazy: a cron-only or shell-only isolate never imports the GitHub /
+      // provider-secret graphs these syncs hydrate.
+      const [{ syncGitHubConfigFromDbAsync }, { backfillProviderSecrets }] = await Promise.all([
+        import("./github/client"),
+        import("./db/provider-secrets-backfill"),
+      ]);
       const envStrings = stringEnvFromRuntimeEnv(runtimeEnv);
       await Effect.runPromise(
         Effect.gen(function* () {
@@ -183,19 +216,11 @@ function ensureBoot(env: WorkersEnv): Promise<void> {
           );
         }).pipe(Effect.catchAll((e) => Effect.sync(() => console.error("[Workers] boot sync failed:", String(e)))))
       );
-      // Boot-time stale assistant-task sweep (ADR-0005 §Reliability backstop):
-      // fail `assistant_tasks` rows stranded `running` by a crash/eviction so
-      // reset/resume is never blocked. Fire-and-forget — never blocks boot.
-      void Effect.runPromise(sweepStaleAssistantTasks(driver))
-        .then(({ failed }) => {
-          if (failed > 0) console.log(`[Assistant] failed ${failed} stale running task(s)`);
-        })
-        .catch((e) => console.error("[Assistant] stale-task sweep failed:", e instanceof Error ? e.message : String(e)));
     })().catch((e) => {
       console.error("[Workers] boot failed:", e instanceof Error ? e.message : String(e));
     });
   }
-  return bootPromise;
+  return apiBoot;
 }
 
 // ─── Response helpers (same envelopes as the Bun host) ───────────────────
@@ -260,13 +285,21 @@ function apiFingerprint(runtimeEnv: RuntimeEnv): string {
 
 // better-auth is isolate-stable the same way the API stack is: build once per
 // env fingerprint. Shared by the REST handler and the assistant WS gate so the
-// session call is byte-for-byte the one the API middleware uses.
-let authCache: { fingerprint: string; value: { auth: BetterAuthApi } } | null = null;
+// session call is byte-for-byte the one the API middleware uses. Async because
+// `./auth` is loaded lazily (cron/shell isolates never import better-auth).
+let authCache: { fingerprint: string; value: Promise<{ auth: BetterAuthApi }> } | null = null;
 
-export function getRuntimeAuth(runtimeEnv: RuntimeEnv): { auth: BetterAuthApi } {
+export function getRuntimeAuth(runtimeEnv: RuntimeEnv): Promise<{ auth: BetterAuthApi }> {
   const fingerprint = apiFingerprint(runtimeEnv);
   if (!authCache || authCache.fingerprint !== fingerprint) {
-    authCache = { fingerprint, value: createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi } };
+    const value = import("./auth").then(
+      ({ createAuth }) => createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi }
+    );
+    const entry = { fingerprint, value };
+    authCache = entry;
+    value.catch(() => {
+      if (authCache === entry) authCache = null;
+    });
   }
   return authCache.value;
 }
@@ -310,7 +343,10 @@ async function handleApi(
 ): Promise<Response> {
   const fingerprint = apiFingerprint(runtimeEnv);
   if (!apiCache || apiCache.fingerprint !== fingerprint) {
-    const lexaAuth = getRuntimeAuth(runtimeEnv);
+    const lexaAuth = await getRuntimeAuth(runtimeEnv);
+    // Static import would put the whole API/assistant graph back in every
+    // isolate's eager graph — the exact cost this entry split removes.
+    const { createWorkersApiHandler } = await import("./api/assistant-api");
     const handler = createWorkersApiHandler({
       driver,
       runtimeEnv,
@@ -327,6 +363,7 @@ async function handleApi(
   }
   return apiCache.handler(req as unknown as Request);
 }
+
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 
@@ -434,6 +471,12 @@ async function handleWebhook(
     return json({ error: { code: "BODY_TOO_LARGE", message: "Request body too large" } }, 413);
   }
   const signature = headers.get("x-hub-signature-256");
+  // Lazy: the GitHub service graph is webhook-only and must stay out of the
+  // Worker's eager module graph (cron/shell isolates never deliver one).
+  const [{ GitHubClient }, { GitHubService }] = await Promise.all([
+    import("./github/client"),
+    import("./services/github.service"),
+  ]);
   // One ManagedRuntime per delivery: verify and process share a single Layer
   // build, disposed once in the waitUntil's finally. Never cached across
   // deliveries — the webhook config holder is mutable so a Settings save
@@ -539,7 +582,9 @@ export async function pruneR2Backups(blob: R2Bucket, retention: number): Promise
 // was the only consumer of `assistant_schedules`; the tables and REST CRUD stay
 // inert. This tick keeps the platform prune + backup retention only.
 async function runScheduled(env: WorkersEnv): Promise<void> {
-  await ensureBoot(env);
+  // Cron only prunes + sweeps; the API boot syncs (GitHub/provider holders)
+  // are not consumed here and their modules stay unloaded on this isolate.
+  await ensureCoreBoot(env);
   const { runtimeEnv, driver } = requestLayers(env);
   await runScheduledCore(driver, runtimeEnv, env.BLOB);
 }
@@ -586,9 +631,9 @@ const handler: ExportedHandler<WorkersEnv> = {
       }
 
       // Health probes are served BEFORE boot: requestLayers is memoized per
-      // env fingerprint and independent of bootPromise, and /api/health's D1
-      // deep check needs no boot state — a probe must not queue behind the
-      // four sequential first-request D1 syncs in ensureBoot.
+      // env fingerprint and independent of the boot promises, and /api/health's
+      // D1 deep check needs no boot state — a probe must not queue behind the
+      // first-request D1 syncs in ensureApiBoot.
       if (path === "/health") {
         return json({ ok: true, flavor: "workers" }) as unknown as WorkersResponse;
       }
@@ -603,7 +648,10 @@ const handler: ExportedHandler<WorkersEnv> = {
         return json({ ok: true }) as unknown as WorkersResponse;
       }
 
-      await ensureBoot(env);
+      // API/MCP/webhook routes consume the boot-synced holders (rate limiter,
+      // GitHub config, provider secrets); shell/SSR isolates never do.
+      if (path === MCP_PATH || path.startsWith("/api/")) await ensureApiBoot(env);
+      else await ensureCoreBoot(env);
       const { runtimeEnv, driver, base } = requestLayers(env);
 
       // Inbound MCP (Streamable HTTP): personal bearer only, stateless, and
@@ -616,6 +664,12 @@ const handler: ExportedHandler<WorkersEnv> = {
           resolveTrustedProxyCidrs(runtimeEnv)
         );
         const authHeader = req.headers.get("authorization") ?? "";
+        // Lazy: the MCP SDK + Ajv must not ride the eager graph of every API
+        // isolate (this branch is the only consumer).
+        const [{ handleMcpRequest }, { createRestDispatch }] = await Promise.all([
+          import("./mcp/http"),
+          import("./mcp/rest"),
+        ]);
         const response = await handleMcpRequest(req as unknown as Request, {
           env: runtimeEnv,
           clientIp,
@@ -641,7 +695,7 @@ const handler: ExportedHandler<WorkersEnv> = {
       // means first-run setup/status stay reachable without it.
       if (path.startsWith("/api/") && (runtimeEnv.LXK_SECRETS_MASTER_KEY ?? "").trim().length > 0) {
         try {
-          const authInstance = getRuntimeAuth(runtimeEnv).auth;
+          const authInstance = (await getRuntimeAuth(runtimeEnv)).auth;
           if (authInstance.$context) {
             ctx.waitUntil(
               authInstance.$context.catch((error: unknown) => {
@@ -659,7 +713,12 @@ const handler: ExportedHandler<WorkersEnv> = {
         // per-IP throttle → body cap → sign-in email limiter → handler. The
         // better-auth instance is the cached per-isolate one; `ip` and the body
         // cap stay per request.
-        const lexaAuth = getRuntimeAuth(runtimeEnv);
+        // Lazy: the auth surface + better-auth must not ride the eager graph of
+        // cron/shell isolates (this branch is their only consumer).
+        const [{ handleAuthSurface }, lexaAuth] = await Promise.all([
+          import("./auth"),
+          getRuntimeAuth(runtimeEnv),
+        ]);
         const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
         // The native recovery endpoint is superseded by the Lexa-owned wrapper:
         // same public path (trailing slashes normalized), but the existing
@@ -668,6 +727,8 @@ const handler: ExportedHandler<WorkersEnv> = {
         // this request's waitUntil. auth.ts also disables the native router
         // path outright, so no alternate HTTP variant can issue around this.
         if (req.method === "POST" && path.replace(/\/+$/, "") === "/api/auth/request-password-reset") {
+          // Lazy: recovery/email issuance is one endpoint, not a boot cost.
+          const { handlePasswordRecoveryRequest } = await import("./auth-recovery");
           const res = await handleAuthSurface(req as unknown as Request, {
             ip,
             maxBodyBytes: resolveMaxApiBody(runtimeEnv),

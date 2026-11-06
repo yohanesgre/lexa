@@ -692,6 +692,14 @@ A dry run prints `Release`, `Latest` (with current), `Checksum`, and
 5. **Assistant capability scope** — the coding tier (shell, file edits, sandboxes)
    is gone by design; users expecting a coding agent get an explicit explanation
    rather than a degraded mode.
+6. **Isolate memory + cold-start CPU.** Observed production baseline was 107 MB
+   average / 129 MB peak against the 128 MB per-isolate ceiling, with 365 ms
+   average startup CPU (1.39 s on cron ticks) — memory, not the 30 s CPU budget,
+   is the binding constraint. Keep the eager (static-import) graph minimal:
+   `workers-entry.ts` loads the API/auth/MCP/GitHub/assistant graphs through
+   `import()`, and the exported `LexaChatSupervisor` DO class must not statically
+   import the assistant layer. A new top-level import in either module
+   re-inflates every isolate, including cron ticks that only run three DELETEs.
 
 ## Bottom line
 
