@@ -261,6 +261,10 @@ export interface Capabilities {
   // LX-2 kill switch (LXK_DISABLE_CHAT_ATTACHMENTS=1 → false); absent on older
   // builds, which the UI treats as enabled.
   chatAttachments?: boolean | undefined;
+  // Effective self-service recovery availability (EMAIL binding + sender
+  // configured). Absent on older builds, which the UI treats as unavailable so
+  // no request form is offered.
+  passwordRecovery?: boolean | undefined;
 }
 
 export function getCapabilities(): Promise<Capabilities> {
@@ -525,7 +529,27 @@ export function deleteWorkspaceMember(userId: string): Promise<void> {
   return request(`${BASE}/workspace/members/${userId}`, { method: "DELETE" });
 }
 
-export function createWorkspaceInvite(email: string): Promise<{ link: string }> {
+// Delivery is separate from link issuance: `accepted` means Cloudflare accepted
+// the message, not that an inbox received it.
+export type EmailDeliveryStatus = "accepted" | "failed" | "unknown" | "not_configured";
+
+export interface EmailDeliveryOutcome {
+  status: EmailDeliveryStatus;
+  messageId?: string | undefined;
+}
+
+export interface WorkspaceInviteResult {
+  link: string;
+  invite: WorkspaceInvite;
+  email: EmailDeliveryOutcome;
+}
+
+export interface SetPasswordLinkResult {
+  link: string;
+  email: EmailDeliveryOutcome;
+}
+
+export function createWorkspaceInvite(email: string): Promise<WorkspaceInviteResult> {
   return request(`${BASE}/workspace/invites`, { method: "POST", body: JSON.stringify({ email }) });
 }
 
@@ -552,7 +576,7 @@ export function revokeWorkspaceInvite(inviteId: string): Promise<void> {
   return request(`${BASE}/workspace/invites/${inviteId}`, { method: "DELETE" });
 }
 
-export function createSetPasswordLink(userId: string): Promise<{ link: string }> {
+export function createSetPasswordLink(userId: string): Promise<SetPasswordLinkResult> {
   return request(`${BASE}/workspace/members/${userId}/set-password-link`, { method: "POST" });
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
 import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam, useProjects } from "../../lib/queries";
@@ -6,36 +6,94 @@ import { ApiKeysSection, GithubSyncSection, RateLimitSection, type GithubReturnR
 import { AssistantProvidersSection } from "./AssistantProvidersSection";
 import { AssistantMcpSection } from "./AssistantMcpSection";
 import { formatRelative } from "../../lib/relative-time";
+import { parseApiDate } from "../../lib/date";
 import { AgentsSettingsSection, SkillsSettingsSection } from "./assistant/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
+import { useOverlayFocusTrap } from "../../lib/sidebar-state";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { Project, WorkspaceInvite } from "../../../shared/types";
-import type { WorkspaceMember } from "../../lib/api";
+import type { EmailDeliveryOutcome, WorkspaceMember } from "../../lib/api";
 
 // Superadmin-only workspace settings: Members + invites, Teams, API keys,
 // rate limiting, GitHub sync, Assistant providers, agents & skills.
 // NO Superadmins section — superadmin is env-only (LXK_ADMIN_EMAILS).
 
-function LinkCopyModal({ title, link, onDone }: { title: string; link: string; onDone: () => void }) {
+// Same absolute date shape the wiki share dialog uses for future expiries.
+const EXPIRY_FMT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+function deliveryLine(email: EmailDeliveryOutcome): string {
+  switch (email.status) {
+    case "accepted":
+      return "Email submitted to Cloudflare. Inbox delivery is not guaranteed.";
+    case "failed":
+      return "Link created, but email could not be sent. Copy and share the link.";
+    case "unknown":
+      return "Link created. Email submission could not be confirmed. Copy and share the link.";
+    case "not_configured":
+      return "Email is not configured. Copy and share the link.";
+    default:
+      return "Copy and share the link.";
+  }
+}
+
+function LinkCopyModal({ title, link, email, onDone, restoreFocus }: {
+  title: string;
+  link: string;
+  email: EmailDeliveryOutcome;
+  onDone: () => void;
+  restoreFocus?: (() => HTMLElement | null) | undefined;
+}) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  // Trap Tab in the dialog; focus return is owned below because the invite
+  // opener is disabled by the time the dialog closes.
+  useOverlayFocusTrap(true, dialogRef);
+
+  const restoreFocusRef = useRef(restoreFocus);
+  restoreFocusRef.current = restoreFocus;
+  useEffect(() => {
+    return () => {
+      if (dialogRef.current?.isConnected) return; // dev effect replay, not a close
+      queueMicrotask(() => restoreFocusRef.current?.()?.focus());
+    };
+  }, []);
+
+  // Keep the latest close handler without re-running the mount-time listener.
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onDoneRef.current();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const handleCopy = async () => {
     const ok = await copyToClipboard(link);
     setCopied(ok);
+    setCopyFailed(!ok);
   };
   return (
     <>
       <button type="button" className="slideover-overlay" onClick={onDone} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label={title} style={{ maxWidth: 460, width: "calc(100vw - 48px)" }}>
+        <dialog ref={dialogRef} open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label={title} style={{ maxWidth: 460, width: "calc(100vw - 48px)" }}>
           <h2 className="font-display text-lg font-medium text-lx-text-primary">{title}</h2>
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            Share this link out-of-band (no email is configured for this workspace). Single-use, expires after 7 days.
-          </p>
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">{deliveryLine(email)}</p>
+          <p className="text-xs text-lx-text-muted mt-1">Single-use, expires after 7 days.</p>
           <div className="key-display mt-3">
             <code>{link}</code>
           </div>
+          {copyFailed && (
+            <div className="field-hint-danger" role="alert">Could not copy. Select and copy the link.</div>
+          )}
           <div className="flex items-center gap-2 mt-4 justify-end">
             <button type="button" className="btn btn-ghost" onClick={onDone}>Close</button>
             <button type="button" className="btn btn-primary" onClick={handleCopy}>
@@ -60,13 +118,17 @@ function WorkspaceMembersSection() {
   const revokeInvite = useRevokeWorkspaceInvite();
   const [inviteEmail, setInviteEmail] = useState("");
   const [deleting, setDeleting] = useState<WorkspaceMember | null>(null);
-  const [linkModal, setLinkModal] = useState<{ title: string; link: string } | null>(null);
+  const [linkModal, setLinkModal] = useState<{ kind: "invite" | "set-password"; title: string; link: string; email: EmailDeliveryOutcome } | null>(null);
+  const inviteButtonRef = useRef<HTMLButtonElement | null>(null);
+  const inviteEmailInputRef = useRef<HTMLInputElement | null>(null);
+  const setPasswordOpenerRef = useRef<HTMLButtonElement | null>(null);
 
   const currentUserId = session?.session?.userId;
 
-  const handleSetPassword = (m: WorkspaceMember) => {
+  const handleSetPassword = (m: WorkspaceMember, opener: HTMLButtonElement) => {
+    setPasswordOpenerRef.current = opener;
     setPasswordLink.mutate(m.id, {
-      onSuccess: (res) => setLinkModal({ title: `Set-password link for ${m.email}`, link: res.link }),
+      onSuccess: (res) => setLinkModal({ kind: "set-password", title: `Set-password link for ${m.email}`, link: res.link, email: res.email }),
     });
   };
 
@@ -76,9 +138,19 @@ function WorkspaceMembersSection() {
     createInvite.mutate(email, {
       onSuccess: (res) => {
         setInviteEmail("");
-        setLinkModal({ title: `Invite link for ${email}`, link: res.link });
+        setLinkModal({ kind: "invite", title: `Invite link for ${res.invite.email}`, link: res.link, email: res.email });
       },
     });
+  };
+
+  const restoreInviteFocus = () => {
+    const button = inviteButtonRef.current;
+    return button && !button.disabled ? button : inviteEmailInputRef.current;
+  };
+
+  const restoreSetPasswordFocus = () => {
+    const button = setPasswordOpenerRef.current;
+    return button && !button.disabled ? button : null;
   };
 
   const pendingInvites = invites.data ?? [];
@@ -114,7 +186,7 @@ function WorkspaceMembersSection() {
                         <span className="text-sm font-medium" style={deactivated ? { color: "var(--lx-text-muted)" } : undefined}>{m.name}</span>
                       </div>
                     </td>
-                    <td className="text-xs text-lx-text-secondary">{m.email}</td>
+                    <td className="text-xs text-lx-text-secondary" style={{ overflowWrap: "anywhere" }}>{m.email}</td>
                     <td className="text-xs">
                       {m.role === "superadmin" ? (
                         <span style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>superadmin</span>
@@ -131,7 +203,7 @@ function WorkspaceMembersSection() {
                         <span className="text-xs text-lx-text-muted">Set by your server admin</span>
                       ) : (
                         <>
-                          <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} title="Send set-password link" onClick={() => handleSetPassword(m)}>Set password</button>
+                          <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} title="Send set-password link" onClick={(event) => handleSetPassword(m, event.currentTarget)} disabled={setPasswordLink.isPending && setPasswordLink.variables === m.id}>Set password</button>
                           {deactivated ? (
                             <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} title="Reactivate" onClick={() => updateMember.mutate({ userId: m.id, action: "reactivate" })}>Reactivate</button>
                           ) : (
@@ -154,6 +226,7 @@ function WorkspaceMembersSection() {
         <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Invites</h3>
         <div className="flex items-center gap-3 flex-wrap">
           <input
+            ref={inviteEmailInputRef}
             className="prop-input"
             placeholder="Invite by email (e.g. nova@example.com)"
             value={inviteEmail}
@@ -161,12 +234,12 @@ function WorkspaceMembersSection() {
             style={{ minWidth: 280 }}
             aria-label="Invite email"
           />
-          <button type="button" className="btn btn-primary" onClick={handleInvite} disabled={!inviteEmail.trim() || createInvite.isPending}>
+          <button ref={inviteButtonRef} type="button" className="btn btn-primary" onClick={handleInvite} disabled={!inviteEmail.trim() || createInvite.isPending}>
             <Plus size={14} strokeWidth={1.5} />
             Send invite
           </button>
         </div>
-        <div className="field-hint" style={{ marginTop: 8 }}>Creates a single-use invite link (7-day expiry) delivered out-of-band — no SMTP is configured. Accepting opens /set-password → member account.</div>
+        <div className="field-hint" style={{ marginTop: 8 }}>Creates a single-use invite link (7-day expiry). When email is configured, the invite is emailed to this address; the link stays available to copy and share.</div>
 
         {pendingInvites.length > 0 && (
           <div className="card-panel" style={{ overflow: "hidden", marginTop: 12 }}>
@@ -177,11 +250,11 @@ function WorkspaceMembersSection() {
               <tbody>
                 {pendingInvites.map((i: WorkspaceInvite) => (
                   <tr key={i.id}>
-                    <td className="text-sm font-medium">{i.email}</td>
+                    <td className="text-sm font-medium" style={{ overflowWrap: "anywhere" }}>{i.email}</td>
                     <td className="font-mono text-xs text-lx-text-muted">{i.tokenHint ? `lx-…${i.tokenHint}` : "—"}</td>
-                    <td className="text-xs text-lx-text-secondary">{i.expiresAt ? formatRelative(i.expiresAt) : "—"}</td>
+                    <td className="text-xs text-lx-text-secondary">{i.expiresAt ? EXPIRY_FMT.format(parseApiDate(i.expiresAt)) : "—"}</td>
                     <td style={{ textAlign: "right" }}>
-                      <button type="button" className="btn btn-danger" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={() => revokeInvite.mutate(i.id)}>
+                      <button type="button" className="btn btn-danger" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={() => revokeInvite.mutate(i.id)} disabled={revokeInvite.isPending && revokeInvite.variables === i.id}>
                         Revoke
                       </button>
                     </td>
@@ -202,7 +275,7 @@ function WorkspaceMembersSection() {
           }}
         />
       )}
-      {linkModal && <LinkCopyModal title={linkModal.title} link={linkModal.link} onDone={() => setLinkModal(null)} />}
+      {linkModal && <LinkCopyModal title={linkModal.title} link={linkModal.link} email={linkModal.email} onDone={() => setLinkModal(null)} restoreFocus={linkModal.kind === "invite" ? restoreInviteFocus : restoreSetPasswordFocus} />}
     </section>
   );
 }

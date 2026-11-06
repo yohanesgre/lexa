@@ -15,7 +15,7 @@ import {
   useCreateSwimlane,
   useUpdateRateLimit, useClearGithubSettings,
   useRestoreWikiRevision, useRevisions, wikiKeys,
-  useSignIn, useRevokeWorkspaceInvite,
+  useSignIn, useRevokeWorkspaceInvite, useCreateWorkspaceInvite,
 } from "./queries";
 import { useUpdateTeam } from "./queries/team";
 import { settleThreadCache } from "../components/chat/assistant-chat-logic";
@@ -411,6 +411,20 @@ describe("session + invite mutation paths (LX-100/LX-102/LX-103)", () => {
     await act(async () => { await revoke.result.current.mutateAsync("inv1"); });
     expect(queryClient.getQueryData<WorkspaceInvite[]>(["workspace-invites"])).toEqual([]);
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("useCreateWorkspaceInvite seeds the authoritative row and keeps the email outcome separate — no fabricated expiry, no invalidation", async () => {
+    const invite: WorkspaceInvite = { id: "inv2", email: "new@b.test", tokenHint: "abc12345", expiresAt: "2026-11-04T00:00:00.000Z", acceptedAt: null };
+    routes.set("POST /api/workspace/invites", { link: "https://lexa.test/invite?token=secret", invite, email: { status: "failed" } });
+    queryClient.setQueryData<WorkspaceInvite[]>(["workspace-invites"], []);
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const create = renderHook(() => useCreateWorkspaceInvite(), { wrapper });
+    await act(async () => { await create.result.current.mutateAsync("new@b.test"); });
+
+    // A failed send still returns the persisted invitation; the cache row is
+    // that authoritative row, so immediate revoke targets it.
+    expect(queryClient.getQueryData<WorkspaceInvite[]>(["workspace-invites"])).toEqual([invite]);
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });
 
