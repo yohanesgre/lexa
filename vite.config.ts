@@ -40,6 +40,102 @@ export default defineConfig(async ({ command }) => {
   ];
 
   if (isWorkersBuild) {
+    // `environments.ssr.resolve.alias` is not applied to the Cloudflare
+    // plugin's server environment, so add the browser-only shims through the
+    // environment hook instead. Client keeps the real packages.
+    const ssrShims = {
+      "@uiw/react-codemirror": fileURLToPath(new URL("./server/workers-shims/editor-ssr.ts", import.meta.url)),
+      "@codemirror/state": fileURLToPath(new URL("./server/workers-shims/editor-ssr.ts", import.meta.url)),
+      "@codemirror/view": fileURLToPath(new URL("./server/workers-shims/editor-ssr.ts", import.meta.url)),
+      "@codemirror/commands": fileURLToPath(new URL("./server/workers-shims/editor-ssr.ts", import.meta.url)),
+      "@codemirror/language": fileURLToPath(new URL("./server/workers-shims/editor-ssr.ts", import.meta.url)),
+      "@codemirror/lang-markdown": fileURLToPath(new URL("./server/workers-shims/editor-ssr.ts", import.meta.url)),
+      "@dnd-kit/core": fileURLToPath(new URL("./server/workers-shims/dnd-kit-ssr.ts", import.meta.url)),
+      "@dnd-kit/sortable": fileURLToPath(new URL("./server/workers-shims/dnd-kit-ssr.ts", import.meta.url)),
+      "@dnd-kit/utilities": fileURLToPath(new URL("./server/workers-shims/dnd-kit-ssr.ts", import.meta.url)),
+      "better-auth/tanstack-start": fileURLToPath(new URL("./server/workers-shims/better-auth-tanstack-start.ts", import.meta.url)),
+    };
+    plugins.push({
+      name: "lexa-workers-ssr-shims",
+      enforce: "pre",
+      configEnvironment(name) {
+        if (name !== "ssr") return;
+        return {
+          build: {
+            rollupOptions: {
+              output: {
+                // Both server/api/http.ts and server/mcp/http.ts would emit an
+                // `http-*` chunk. Rename only the MCP transport chunk so
+                // `http-*` unambiguously means the API surface (the MCP chunk
+                // legitimately carries the MCP SDK/Zod graph).
+                chunkFileNames: (chunk) =>
+                  chunk.facadeModuleId?.endsWith("/server/mcp/http.ts")
+                    ? "assets/server-mcp-[hash].js"
+                    : "assets/[name]-[hash].js",
+                codeSplitting: {
+                  groups: [
+                    {
+                      // Only the shared modules that server-app recursion was
+                      // absorbing (assistant constants, mention tokens). A
+                      // priority above server-app keeps the dependency
+                      // direction server-app -> shared. Keep this list to
+                      // modules with no eager importer: adding db/schema/types
+                      // et al. makes the whole chunk (and its dependencies)
+                      // part of the Worker entry closure.
+                      name: "server-shared-core",
+                      test: /[\\/]shared[\\/](?:assistant|mention-entities|skill-tokens)\.ts$/,
+                      priority: 3,
+                    },
+                    {
+                      // Server modules import DOCUMENT_MIME and boardTaskToTask
+                      // at runtime. Separate chunks keep the direction
+                      // server -> shared without pulling the SSR app chunk;
+                      // neither has an eager entry importer.
+                      name: "server-shared-formats",
+                      test: /[\\/]shared[\\/]document-formats\.ts$/,
+                      priority: 3,
+                    },
+                    {
+                      name: "server-shared-types",
+                      test: /[\\/]shared[\\/]types\.ts$/,
+                      priority: 3,
+                    },
+                    {
+                      // The two shared helpers with vendor dependencies
+                      // (`markdownToText`, `keyAfter`). Keep them separate
+                      // from server-shared-core: shared/markdown imports the
+                      // Markdown parser, and eager modules such as errors.ts
+                      // must not pull that into the Worker entry.
+                      name: "server-shared",
+                      test: /[\\/]shared[\\/](?:markdown|positions)\.ts$/,
+                      priority: 2,
+                    },
+                    {
+                      // Route shells and UI components only: app/lib holds the
+                      // SSR bridges (share.server, auth-session.server) that
+                      // statically reach server/db/env. The chunk sits behind
+                      // Start's lazy import; the Worker entry never imports it.
+                      name: "server-app",
+                      test: /[\\/]app[\\/](?:routes|components)[\\/]/,
+                      priority: 1,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        };
+      },
+      resolveId: {
+        filter: {
+          id: /^(?:@uiw\/react-codemirror|@codemirror\/(?:state|view|commands|language|lang-markdown)|@dnd-kit\/(?:core|sortable|utilities)|better-auth\/tanstack-start)$/,
+        },
+        handler(id) {
+          if (this.environment.name !== "ssr") return;
+          return ssrShims[id as keyof typeof ssrShims];
+        },
+      },
+    });
     const { cloudflare } = await import("@cloudflare/vite-plugin");
     plugins.unshift(
       cloudflare({
@@ -117,6 +213,11 @@ export default defineConfig(async ({ command }) => {
                 name: "vendor-markdown",
                 test: /node_modules[\\/](@tanstack[\\/]markdown|@lezer[\\/](?:markdown|common|highlight)|highlight\.js)[\\/]/,
                 priority: 11,
+              },
+              {
+                name: "vendor-dnd",
+                test: /node_modules[\\/]@dnd-kit[\\/]/,
+                priority: 10,
               },
               {
                 name: "vendor-icons",

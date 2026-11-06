@@ -20,6 +20,7 @@ import { extractSnippet, shareHeadMeta, type SharedTree } from "../app/lib/share
 import {
   getRuntimeAuth,
   injectEntryScript,
+  isAssistantApiPath,
   requestLayers,
   resetAuthCache,
   resetRequestLayersCache,
@@ -219,6 +220,38 @@ function execCtx(): { tasks: Promise<unknown>[]; ctx: never } {
     } as never,
   };
 }
+
+describe("assistant route split", () => {
+  it("routes every assistant group path to the assistant handler and leaves base paths core", () => {
+    for (const path of [
+      "/api/assistant/tasks",
+      "/api/assistant/chat/stream",
+      "/api/assistant/schedules/p1",
+      "/api/assistant/mcp-servers",
+      "/api/assistant/jev",
+      "/api/admin/assistant/usage",
+      "/api/admin/assistant/providers",
+      "/api/projects/p1/assistant/usage",
+      "/api/projects/p1/assistant/jev",
+      "/api/projects/p1/assistant/mcp-servers",
+    ]) {
+      expect(isAssistantApiPath(path)).toBe(true);
+    }
+    for (const path of [
+      "/api/projects",
+      "/api/projects/p1/documents/t1/sources",
+      "/api/projects/p1/documents/assistant/sources",
+      "/api/projects/p1/tasks/assistant/x",
+      "/api/agents",
+      "/api/skills",
+      "/api/tasks/t1",
+      "/api/admin/users",
+      "/api/capabilities",
+    ]) {
+      expect(isAssistantApiPath(path)).toBe(false);
+    }
+  });
+});
 
 describe("per-isolate caches", () => {
   const env = (): WorkersEnv => ({

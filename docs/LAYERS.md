@@ -1535,7 +1535,12 @@ the run intact, and Jev emits no `task_activity` of its own.
 - **REST shell** — the assistant REST handlers live in
   `server/api/assistant-api.ts` (groups in `server/api/assistant-contracts.ts`),
   composed by `createWorkersApiHandler` = base + assistant, and by the Bun host
-  via `fullRouteGroups()`.
+  via `fullRouteGroups()`. The Workers entry routes assistant prefixes
+  (`/api/assistant/*`, `/api/admin/assistant/*`, `/api/projects/:id/assistant/*`)
+  to that full handler and every other `/api/*` request to the base-only
+  `createCoreApiHandler` in `server/api/core-api.ts`, so board/wiki/projects
+  traffic never builds or links the assistant service layer. Both handlers
+  cache per env fingerprint and share the same auth hooks/middleware.
 
 ### Lexa/Assistant — assistant tier (server-side TanStack AI; both flavors over SSE)
 

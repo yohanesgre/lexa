@@ -14,6 +14,19 @@ All notable changes to Lexa are documented here. Format based on
   and the timeline includes archived milestones and sprints as dimmed,
   read-only history so the gantt covers the whole project.
 
+### Changed
+
+- **Leaner Workers cold start.** The Worker upload drops from 153 to 59
+  modules (13.7 MB to 11.2 MB) with the entry still ~28 KB: non-assistant
+  `/api/*` requests use a base-only handler and never link the assistant AI
+  graph; CodeMirror and dnd-kit resolve to inert SSR shims (the browser keeps
+  the real packages); token cost estimation uses zero-dependency `tokenx`
+  instead of the `js-tiktoken` ranks chunk; and the server bundle merges its
+  SSR route/component chunks behind Start's lazy import. Markdown readiness is
+  checked once per isolate (a failure retries), and the client deduplicates
+  `get-session` across the root guard and auth bounce for 1.5 s, clearing on
+  every auth mutation.
+
 ## [2026.14.3] - 2026-11-07
 
 ### Added
