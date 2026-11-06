@@ -138,6 +138,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
   const [editing, setEditing] = useState<Milestone | null>(null);
   const [archiving, setArchiving] = useState<Milestone | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [archivedCollapsed, setArchivedCollapsed] = useState(true);
 
   const { active, archived } = splitByArchive(milestones);
   const archivingSprints = archiving ? milestoneRemainingSprints(boardAll, archiving.id) : [];
@@ -190,7 +191,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
       </div>
 
       {tab === "timeline" ? (
-        <TimelineTab slug={slug} board={board ?? undefined} milestones={milestones} />
+        <TimelineTab slug={slug} milestones={milestones} />
       ) : (
         <div>
           {milestones.length === 0 && (
@@ -216,26 +217,37 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
 
           {archived.length > 0 && (
             <>
-              <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "20px 0 8px" }}>
+              <button
+                type="button"
+                className="ms-archive-toggle"
+                onClick={() => setArchivedCollapsed((value) => !value)}
+                aria-expanded={!archivedCollapsed}
+              >
+                <svg className={cn("chevron", archivedCollapsed && "collapsed")} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
                 Archived milestones
-              </div>
-              <div className="milestone-grid">
-                {archived.map((m) => (
-                  <MilestoneCard
-                    key={m.id}
-                    milestone={m}
-                    isActive={false}
-                    board={board ?? undefined}
-                    collapsed={false}
-                    onToggleCollapsed={() => {}}
-                    isAdmin={isAdmin}
-                    onEdit={() => { setEditing(m); setIsFormOpen(true); }}
-                    onArchive={() => {}}
-                    onRestore={() => restoreMilestone.mutate({ id: m.id })}
-                    onDelete={() => deleteMilestone.mutate({ id: m.id })}
-                  />
-                ))}
-              </div>
+                <span className="ms-archive-count">{archived.length}</span>
+              </button>
+              {!archivedCollapsed && (
+                <div className="milestone-grid">
+                  {archived.map((m) => (
+                    <MilestoneCard
+                      key={m.id}
+                      milestone={m}
+                      isActive={false}
+                      board={board ?? undefined}
+                      collapsed={false}
+                      onToggleCollapsed={() => {}}
+                      isAdmin={isAdmin}
+                      onEdit={() => { setEditing(m); setIsFormOpen(true); }}
+                      onArchive={() => {}}
+                      onRestore={() => restoreMilestone.mutate({ id: m.id })}
+                      onDelete={() => deleteMilestone.mutate({ id: m.id })}
+                    />
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>
