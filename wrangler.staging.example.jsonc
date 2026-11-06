@@ -42,11 +42,12 @@
   "main": "./dist/server/index.js",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
-  // Same rationale as the root config: D1's primary is remote to the visitor's
-  // colo, so placement collapses the per-query RTT chain. Fetch only — the
-  // scheduled tick is unaffected.
+  // Same rationale as the root config: D1's primary is in APAC, the target
+  // edge is Jakarta + Singapore, so pin the Jakarta colo instead of relying
+  // on Smart Placement's traffic analysis. Fetch only; the scheduled tick is
+  // unaffected.
   "placement": {
-    "mode": "smart"
+    "region": "gcp:asia-southeast2"
   },
   "ai": {
     "binding": "AI"

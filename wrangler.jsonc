@@ -10,15 +10,18 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	// Smart Placement: the Worker's backend is D1, whose primary runs in APAC
-	// (`running_in_region`), while requests land in the visitor's nearest colo.
-	// Every boot/handler query pays the cross-region round trip otherwise (see
-	// the 2026-11-06 telemetry analysis). Placement only affects `fetch`;
-	// scheduled ticks keep running where Cloudflare dispatches them, so the
-	// boot path is also batched in server/workers-entry.ts. Static assets are
-	// still served from the colo nearest the request.
+	// Placement hint pinned to Jakarta (CGK). D1's primary is in APAC
+	// (`running_in_region`), the target edge is Jakarta + Singapore, and
+	// CGK↔SIN is ~15–20 ms, so pinning CGK keeps every D1 round trip in the
+	// single-digit-to-low-tens-ms range while serving Indonesian users from
+	// the closest colo. The learned `mode: "smart"` is deliberately NOT used:
+	// at ~50–80 req/day it can stay INSUFFICIENT_INVOCATIONS and never place.
+	// Singapore alternative: "region": "aws:ap-southeast-1" (one line).
+	// Placement only affects `fetch`; scheduled ticks keep their dispatch
+	// location, which is why the boot path is also batched in
+	// server/workers-entry.ts. Static assets stay on the nearest colo.
 	"placement": {
-		"mode": "smart"
+		"region": "gcp:asia-southeast2"
 	},
 	"ai": {
 		"binding": "AI"
