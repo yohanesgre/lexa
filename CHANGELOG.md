@@ -7,6 +7,17 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.14.1] - 2026-11-06
+
+### Changed
+
+- **Branded transactional email templates.** Workspace invitations,
+  self-service password resets, and admin-issued password-setup links now
+  share a table-based layout (LX plate and wordmark, amber action plate,
+  bordered expiry panel, monospace fallback URL) with plain-text
+  alternatives. Expiry timestamps render as readable UTC instead of raw ISO.
+  Delivery behavior, outcome classification, and link issuance are unchanged.
+
 ## [2026.14.0] - 2026-11-06
 
 ### Added
