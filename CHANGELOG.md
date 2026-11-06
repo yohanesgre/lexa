@@ -7,6 +7,25 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.14.3] - 2026-11-07
+
+### Added
+
+- **Recovery and email-outcome UI.** The login page now offers a
+  capability-gated password-recovery form with a uniform acknowledgement and
+  inline validation/throttling, and `/set-password` accepts both native
+  30-minute recovery tokens and 7-day admin links — the token wins over a
+  cached session. Workspace Members shows the authoritative invite row plus
+  the separate delivery outcome (`accepted`, `failed`, `unknown`,
+  `not_configured`), keeps the link copyable when delivery fails or is
+  unconfirmed, and reports a clipboard failure inline.
+
+### Fixed
+
+- Pending invite expiry renders as an absolute date instead of a relative
+  "just now" for a future row; link dialogs restore focus to their opener on
+  Escape/close and their actions meet the 44px touch target.
+
 ## [2026.14.2] - 2026-11-06
 
 ### Changed
