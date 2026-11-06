@@ -1559,6 +1559,13 @@ export function useSignIn() {
   });
 }
 
+// Keyless recovery request; the login form owns all result states.
+export function useRequestPasswordReset() {
+  return useMutation({
+    mutationFn: (email: string) => auth.requestPasswordReset({ email }),
+  });
+}
+
 export function useSignOut() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -1574,18 +1581,14 @@ export function useSignOut() {
 }
 
 export function useSetPassword() {
-  const toast = useToast();
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ newPassword, token }: { newPassword: string; token: string }) => auth.setPassword({ newPassword, token }),
     onSuccess: () => {
-      // `/reset-password` returns `{ status: true }` and sets no session
-      // cookie (better-auth `revokeSessionsOnPasswordReset: true` revokes the
-      // current sessions). The user must sign in afterwards; the mutation path
-      // neither seeds nor invalidates the session cache.
-      toast.push("success", "Password set — sign in with your new password");
-    },
-    onError: (err) => {
-      toast.push("error", "Could not set password", toastMessage(err));
+      // Reset revokes this device's session too; write the signed-out read so
+      // the login page cannot bounce on the stale cookie cache (documented
+      // <=300s window). Errors render inline in the form.
+      qc.setQueryData<auth.SessionResponse>(["session"], { session: null, user: null });
     },
   });
 }
@@ -1781,20 +1784,13 @@ export function useCreateWorkspaceInvite() {
   const toast = useToast();
   return useMutation({
     mutationFn: (email: string) => api.createWorkspaceInvite(email),
-    onSuccess: (result, email) => {
-      // No row in the response ({ link } only) — seed the cache with a
-      // pending row built from the inputs; the server list replaces it.
+    onSuccess: (result) => {
+      // Cache the authoritative row (real id/expiry) for immediate revoke; the
+      // caller's dialog owns the link and delivery outcome.
       qc.setQueryData<WorkspaceInvite[]>(["workspace-invites"], (old) => {
-        const row: WorkspaceInvite = {
-          id: `pending-${Date.now()}`,
-          email,
-          tokenHint: "",
-          expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-          acceptedAt: null,
-        };
-        return old ? [row, ...old] : [row];
+        const rows = old ?? [];
+        return rows.some((i) => i.id === result.invite.id) ? rows : [result.invite, ...rows];
       });
-      toast.push("success", "Invite created", result.link);
     },
     onError: (err) => {
       toast.push("error", "Failed to send invite", toastMessage(err));
@@ -1821,9 +1817,7 @@ export function useCreateSetPasswordLink() {
   const toast = useToast();
   return useMutation({
     mutationFn: (userId: string) => api.createSetPasswordLink(userId),
-    onSuccess: () => {
-      toast.push("success", "Set-password link created");
-    },
+    // The dialog owns the link and delivery outcome; no success toast.
     onError: (err) => {
       toast.push("error", "Failed to create link", toastMessage(err));
     },

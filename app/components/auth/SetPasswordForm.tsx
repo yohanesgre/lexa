@@ -1,17 +1,19 @@
 import { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useSetPassword } from "../../lib/queries";
+import { authErrorCode } from "../../lib/auth";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { NoticeDanger } from "../ui/NoticeDanger";
 
-// Admin-issued set-password links only (/set-password?token=…). The link
-// carries a Better Auth verification token; the server resolves it to the
-// existing account and runs better-auth's native reset-password, which sets
-// the password and revokes existing sessions — it establishes NO session
-// cookie. Tokens are single-use with 7d expiry. Workspace invitation links
-// (/invite?token=…) are a different token kind on a separate surface.
-export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () => void }) {
+// Verification-token password completion (/set-password?token=…). Two token
+// kinds share this form: self-service reset tokens (better-auth native, 30
+// minutes) and admin-issued set-password links (7 days). The server resolves
+// either to the existing account and runs better-auth's native reset-password,
+// which sets the password and revokes existing sessions — it establishes NO
+// session cookie, so success requires a fresh sign-in. Workspace invitation
+// links (/invite?token=…) are a different token kind on a separate surface.
+export function SetPasswordForm({ token }: { token: string }) {
   const navigate = useNavigate();
   const setPassword = useSetPassword();
   const [password, setPasswordValue] = useState("");
@@ -21,6 +23,12 @@ export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () 
 
   const tooShort = password.length > 0 && password.length < 8;
   const canSubmit = password.length >= 8 && confirm.length > 0 && !tooShort && !confirmError;
+  const code = authErrorCode(setPassword.error);
+  const inlineError = setPassword.isError
+    ? code === "INVALID_TOKEN"
+      ? "This link is invalid, expired, or already used. Request a new reset link from sign in, or ask your admin for a new one."
+      : setPassword.error?.message || "Could not set password. Try again."
+    : null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,10 +39,7 @@ export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () 
     setPassword.mutate(
       { newPassword: password, token },
       {
-        onSuccess: () => {
-          setDone(true);
-          onDone?.();
-        },
+        onSuccess: () => setDone(true),
       }
     );
   };
@@ -56,7 +61,10 @@ export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () 
 
   return (
     <form onSubmit={handleSubmit} className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>
-      <p className="text-sm text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>Set a password for your account. Minimum 8 characters.</p>
+      {inlineError && (
+        <div role="alert"><NoticeDanger>{inlineError}</NoticeDanger></div>
+      )}
+      <p className="text-sm text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>Set a password for your account. Minimum 8 characters. This link works once.</p>
 
       <Field label="Password" htmlFor="sp-password" hint="At least 8 characters." error={tooShort ? "At least 8 characters." : undefined} className="field mb-3">
         <TextInput id="sp-password" type="password" placeholder="••••••••••••" autoComplete="new-password" value={password} onChange={(v) => { setPasswordValue(v); setConfirmError(null); }} />
@@ -73,15 +81,17 @@ export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () 
   );
 }
 
-// Invalid / expired token state — form withheld. Tokens are single-use and
-// expire after 7 days; only superadmins can issue fresh links.
+// A missing token cannot complete; the form is withheld.
 export function InvalidTokenState() {
   return (
     <div className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>
-      <NoticeDanger>This link is invalid or has expired. Ask your admin for a new one.</NoticeDanger>
+      <NoticeDanger>This link is invalid or has expired.</NoticeDanger>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>
-        Tokens are single-use and expire after 7 days. Your admin can send a fresh link from Workspace settings → Members → "Send set-password link".
+        Password links are single-use. Request a new reset link from the sign-in page, or ask your admin for a new one.
       </p>
+      <Link to="/login" className="btn btn-ghost w-full" style={{ height: 44, textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+        Back to sign in
+      </Link>
     </div>
   );
 }

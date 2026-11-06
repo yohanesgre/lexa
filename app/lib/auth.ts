@@ -63,6 +63,26 @@ export const getSession = createIsomorphicFn()
   })
   .client(fetchSessionClient);
 
+// Auth errors carry the Better Auth code and the wrapper HTTP status as extra
+// Error fields; narrow them instead of casting at call sites.
+export function authErrorCode(err: unknown): string | undefined {
+  if (err instanceof Error && "code" in err && typeof err.code === "string") return err.code;
+  return undefined;
+}
+
+export function authErrorStatus(err: unknown): number | undefined {
+  if (err instanceof Error && "status" in err && typeof err.status === "number") return err.status;
+  return undefined;
+}
+
+interface AuthErrorPayload {
+  message?: string | undefined;
+  code?: string | undefined;
+  // Native Better Auth errors carry `message`/`code` at the top level; the
+  // app's wrapper uses the `{ error: { code, message } }` envelope.
+  error?: string | { code?: string | undefined; message?: string | undefined } | undefined;
+}
+
 async function authRequest(path: string, body: unknown): Promise<unknown> {
   const res = await fetch(`${AUTH_BASE}${path}`, {
     method: "POST",
@@ -71,9 +91,13 @@ async function authRequest(path: string, body: unknown): Promise<unknown> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({})) as { message?: string | undefined; error?: string | undefined; code?: string };
-    const err = new Error(data.message ?? data.error ?? `HTTP ${res.status}`) as Error & { code?: string };
-    err.code = data.code ?? (data.error ?? undefined!);
+    const data = (await res.json().catch(() => ({}))) as AuthErrorPayload;
+    const envelope = typeof data.error === "object" && data.error !== null ? data.error : undefined;
+    const legacyMessage = typeof data.error === "string" ? data.error : undefined;
+    const err = new Error(data.message ?? envelope?.message ?? legacyMessage ?? `HTTP ${res.status}`) as Error & { code?: string; status?: number };
+    const code = data.code ?? envelope?.code ?? legacyMessage;
+    if (code !== undefined) err.code = code;
+    err.status = res.status;
     throw err;
   }
   if (res.status === 204) return undefined;
@@ -88,16 +112,26 @@ export function signOut(): Promise<void> {
   return authRequest("/sign-out", {}) as Promise<void>;
 }
 
-// Verification-token password set for admin-issued set-password links
-// (/set-password?token=) only: the server resolves the token to the existing
-// account (identifier `reset-password:<token>`,
-// server/services/password-links.service.ts) and runs better-auth's native
-// /reset-password, which sets the password and revokes existing sessions
-// (`revokeSessionsOnPasswordReset`) — including any session current on this
-// device, so a signed-in caller is signed out by the reset. It returns
-// `{ status: true }` and seeds NO session cookie — the user must sign in
-// afterwards. Workspace invitation links (/invite?token=) live in a different
-// table and use acceptInvite below — the two token kinds are not
+// Keyless self-service recovery. The server acknowledges before any account
+// lookup or send, so provider outcome never reaches the client.
+export interface PasswordResetRequestResult {
+  status: boolean;
+  message: string;
+}
+
+export function requestPasswordReset(input: { email: string }): Promise<PasswordResetRequestResult> {
+  return authRequest("/request-password-reset", input) as Promise<PasswordResetRequestResult>;
+}
+
+// Verification-token password set (/set-password?token=). Both token kinds are
+// consumed here: self-service reset tokens (better-auth native, 30 minutes)
+// and admin-issued set-password links (7 days). It sets the password and
+// revokes existing sessions, including any session current on this device; the
+// signed session cache can stay stale for up to the documented 300s window,
+// so the set-password surface treats the token, not the session, as authority.
+// It returns `{ status: true }` and seeds NO session cookie — the user must
+// sign in afterwards. Workspace invitation links (/invite?token=) live in a
+// different table and use acceptInvite below — the two token kinds are not
 // interchangeable.
 export function setPassword(input: { newPassword: string; token: string }): Promise<{ status: boolean }> {
   return authRequest("/reset-password", input) as Promise<{ status: boolean }>;
