@@ -293,10 +293,14 @@ describe("pre-boot health", () => {
 });
 
 // The webhook secret resolves from the legacy plaintext settings row; the same
-// row also seeds the module-scope GitHub config holder during ensureBoot.
+// row also seeds the module-scope GitHub config holder during ensureBoot. The
+// resolver reads both legacy keys in one IN query, so match the key set rather
+// than the first positional param.
 const SECRET = "workers-entry-test-secret";
 const settingsAll = (sql: string, params: unknown[]): Array<Record<string, unknown>> =>
-  sql.includes("FROM settings") && params[0] === "github_webhook_secret" ? [{ value: SECRET }] : [];
+  sql.includes("FROM settings") && params.includes("github_webhook_secret")
+    ? [{ key: "github_webhook_secret", value: SECRET }]
+    : [];
 const configDb = (queries?: string[], documentFormat = "markdown-v1"): Record<string, unknown> =>
   d1Stub({
     all: settingsAll,

@@ -65,11 +65,36 @@ const settingClearStmt = (key: string): BatchStmt => ({
 });
 
 // Missing table (an older test DB that never ran 0017) reads as "no row",
-// never an error — the fallback settings rows still work.
-const readSecretRow = (driver: DbDriver, name: GithubSecretName): Effect.Effect<SecretRowShape | null, never> =>
-  queryAll<SecretRowShape>(driver, "SELECT ciphertext, iv, key_id FROM github_app_secrets WHERE name = ?", name).pipe(
-    Effect.map((rows) => rows[0] ?? null),
-    Effect.catchAll(() => Effect.succeed(null))
+// never an error — the fallback settings rows still work. Both secret rows are
+// fetched in one query: boot used to pay one D1 round trip per name, and the
+// legacy fallbacks another per missing name.
+const GITHUB_SECRET_NAMES = ["private_key", "webhook_secret"] as const satisfies readonly GithubSecretName[];
+const LEGACY_SECRET_SETTINGS: Record<GithubSecretName, string> = {
+  private_key: "github_private_key",
+  webhook_secret: "github_webhook_secret",
+};
+
+const readSecretRows = (
+  driver: DbDriver,
+  names: readonly GithubSecretName[]
+): Effect.Effect<Map<GithubSecretName, SecretRowShape>, never> =>
+  queryAll<SecretRowShape & { name: GithubSecretName }>(
+    driver,
+    `SELECT name, ciphertext, iv, key_id FROM github_app_secrets WHERE name IN (${names.map(() => "?").join(", ")})`,
+    ...names
+  ).pipe(
+    Effect.map((rows) => new Map(rows.map((row) => [row.name, { ciphertext: row.ciphertext, iv: row.iv, key_id: row.key_id }] as const))),
+    Effect.catchAll(() => Effect.succeed(new Map<GithubSecretName, SecretRowShape>()))
+  );
+
+const readSettingsByKeys = (driver: DbDriver, keys: readonly string[]): Effect.Effect<Map<string, string>, never> =>
+  queryAll<{ key: string; value: string }>(
+    driver,
+    `SELECT key, value FROM settings WHERE key IN (${keys.map(() => "?").join(", ")})`,
+    ...keys
+  ).pipe(
+    Effect.map((rows) => new Map(rows.map((row) => [row.key, row.value]))),
+    Effect.catchAll(() => Effect.succeed(new Map<string, string>()))
   );
 
 function keyringOrNull(env: Pick<RuntimeEnv, "LXK_SECRETS_MASTER_KEY" | "LXK_SECRETS_MASTER_KEY_PREV"> | null | undefined): Effect.Effect<SecretKeyring | null, never> {
@@ -93,40 +118,43 @@ function openSecretRow(name: GithubSecretName, row: SecretRowShape, keyring: Sec
 }
 
 // Effective private key + webhook secret for the GitHub client. Encrypted rows
-// first; legacy plaintext rows only when no encrypted row exists.
+// first; legacy plaintext rows only when no encrypted row exists. Both secret
+// rows — and, only when a row is missing, both legacy settings — load in one
+// query each: this runs on every cold isolate boot.
 export function resolveGithubAppSecrets(
   driver: DbDriver,
   env?: Pick<RuntimeEnv, "LXK_SECRETS_MASTER_KEY" | "LXK_SECRETS_MASTER_KEY_PREV"> | null
 ): Effect.Effect<GithubAppSecrets, never> {
   return Effect.gen(function* () {
     const keyring = yield* keyringOrNull(env);
-    const encryptedPrivateKey = yield* resolveOne(driver, keyring, "private_key", "github_private_key");
-    const encryptedWebhookSecret = yield* resolveOne(driver, keyring, "webhook_secret", "github_webhook_secret");
-    return { privateKey: encryptedPrivateKey, webhookSecret: encryptedWebhookSecret };
-  });
-}
+    const secretRows = yield* readSecretRows(driver, GITHUB_SECRET_NAMES);
+    const missing = GITHUB_SECRET_NAMES.filter((name) => !secretRows.has(name));
+    const legacy =
+      missing.length > 0
+        ? yield* readSettingsByKeys(driver, missing.map((name) => LEGACY_SECRET_SETTINGS[name]))
+        : new Map<string, string>();
 
-function resolveOne(
-  driver: DbDriver,
-  keyring: SecretKeyring | null,
-  name: GithubSecretName,
-  legacyKey: string
-): Effect.Effect<string, never> {
-  return Effect.gen(function* () {
-    const row = yield* readSecretRow(driver, name);
-    if (row !== null) {
-      if (keyring === null) {
-        console.warn(`[GitHub] encrypted ${name} present but LXK_SECRETS_MASTER_KEY is unset — GitHub config reads as unset`);
-        return "";
-      }
-      const opened = yield* openSecretRow(name, row, keyring);
-      if (opened === null) {
-        console.warn(`[GitHub] encrypted ${name} could not be decrypted with the configured master key`);
-        return "";
-      }
-      return opened;
-    }
-    return nonEmpty(yield* readSetting(driver, legacyKey));
+    const resolveOne = (name: GithubSecretName): Effect.Effect<string, never> =>
+      Effect.gen(function* () {
+        const row = secretRows.get(name);
+        if (row !== undefined) {
+          if (keyring === null) {
+            console.warn(`[GitHub] encrypted ${name} present but LXK_SECRETS_MASTER_KEY is unset — GitHub config reads as unset`);
+            return "";
+          }
+          const opened = yield* openSecretRow(name, row, keyring);
+          if (opened === null) {
+            console.warn(`[GitHub] encrypted ${name} could not be decrypted with the configured master key`);
+            return "";
+          }
+          return opened;
+        }
+        return nonEmpty(legacy.get(LEGACY_SECRET_SETTINGS[name]) ?? null);
+      });
+
+    const privateKey = yield* resolveOne("private_key");
+    const webhookSecret = yield* resolveOne("webhook_secret");
+    return { privateKey, webhookSecret };
   });
 }
 

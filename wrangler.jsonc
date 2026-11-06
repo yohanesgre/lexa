@@ -10,6 +10,16 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+	// Smart Placement: the Worker's backend is D1, whose primary runs in APAC
+	// (`running_in_region`), while requests land in the visitor's nearest colo.
+	// Every boot/handler query pays the cross-region round trip otherwise (see
+	// the 2026-11-06 telemetry analysis). Placement only affects `fetch`;
+	// scheduled ticks keep running where Cloudflare dispatches them, so the
+	// boot path is also batched in server/workers-entry.ts. Static assets are
+	// still served from the colo nearest the request.
+	"placement": {
+		"mode": "smart"
+	},
 	"ai": {
 		"binding": "AI"
 	},

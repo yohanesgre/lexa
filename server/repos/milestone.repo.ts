@@ -8,16 +8,38 @@ import { SWIMLANE_SELECT_WITH_COUNTS } from "./swimlane.repo";
 // counts so mutation responses never clobber list-derived FE cache state.
 // Task counts are computed server-side: total includes archived tasks, done
 // counts archived tasks and tasks in done columns (invariant 14).
+//
+// One aggregate per metric, joined once: the correlated-subquery form ran the
+// task scan once per milestone (6.2k rows read per board load on the 2026-11-06
+// production dump, 58% of all D1 rows read). Grouping by (milestone, project)
+// keeps the project guard the subqueries carried: a task counts only toward a
+// milestone in its own project.
 const MILESTONE_SELECT_WITH_COUNTS = `
   SELECT m.*,
-    (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id) AS sprint_count,
-    (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id AND s.archived_at IS NOT NULL) AS archived_sprint_count,
-    (SELECT COUNT(*) FROM tasks t JOIN swimlanes s ON t.swimlane_id = s.id
-       WHERE s.milestone_id = m.id AND t.project_id = m.project_id) AS tasks_total,
-    (SELECT COUNT(*) FROM tasks t JOIN swimlanes s ON t.swimlane_id = s.id JOIN columns c ON c.id = t.column_id
-       WHERE s.milestone_id = m.id AND t.project_id = m.project_id
-         AND (t.archived_at IS NOT NULL OR c.is_done = 1)) AS tasks_done
-  FROM milestones m`;
+    COALESCE(sc.sprint_count, 0) AS sprint_count,
+    COALESCE(sc.archived_sprint_count, 0) AS archived_sprint_count,
+    COALESCE(tt.tasks_total, 0) AS tasks_total,
+    COALESCE(td.tasks_done, 0) AS tasks_done
+  FROM milestones m
+  LEFT JOIN (
+    SELECT milestone_id,
+      COUNT(*) AS sprint_count,
+      SUM(CASE WHEN archived_at IS NOT NULL THEN 1 ELSE 0 END) AS archived_sprint_count
+    FROM swimlanes
+    WHERE milestone_id IS NOT NULL
+    GROUP BY milestone_id
+  ) sc ON sc.milestone_id = m.id
+  LEFT JOIN (
+    SELECT s.milestone_id, t.project_id, COUNT(*) AS tasks_total
+    FROM tasks t JOIN swimlanes s ON s.id = t.swimlane_id
+    GROUP BY s.milestone_id, t.project_id
+  ) tt ON tt.milestone_id = m.id AND tt.project_id = m.project_id
+  LEFT JOIN (
+    SELECT s.milestone_id, t.project_id, COUNT(*) AS tasks_done
+    FROM tasks t JOIN swimlanes s ON s.id = t.swimlane_id JOIN columns c ON c.id = t.column_id
+    WHERE t.archived_at IS NOT NULL OR c.is_done = 1
+    GROUP BY s.milestone_id, t.project_id
+  ) td ON td.milestone_id = m.id AND td.project_id = m.project_id`;
 
 export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/MilestoneRepo", {
   effect: Effect.gen(function* () {

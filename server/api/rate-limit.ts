@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { Effect } from "effect";
-import { queryFirst, type DbDriver } from "../db/db";
+import { queryAll, type DbDriver } from "../db/db";
 
 export interface RateLimiterOptions {
   max?: number; // default 6000 requests per window (self-hosted; Runtime agents are chatty)
@@ -55,15 +55,19 @@ export function syncRateLimitFromDb(db: Database): void {
 // Async port of syncRateLimitFromDb over a DbDriver (Workers/D1 path).
 // Same resolution, same singleton — never throws on missing rows.
 export function syncRateLimitFromDbAsync(driver: DbDriver): Effect.Effect<void, never> {
-  const read = (key: string): Effect.Effect<string | null, never> =>
-    queryFirst<{ value: string }>(driver, "SELECT value FROM settings WHERE key = ?", key).pipe(
-      Effect.map((row) => row.value),
-      Effect.catchAll(() => Effect.succeed(null))
-    );
+  // One round trip, not two: the boot path hits this on every cold isolate and
+  // the settings rows are a pure key lookup. Missing table/rows read as unset.
+  const readAll = queryAll<{ key: string; value: string }>(
+    driver,
+    "SELECT key, value FROM settings WHERE key IN ('rate_limit_max', 'rate_limit_window_ms')"
+  ).pipe(Effect.catchAll(() => Effect.succeed([])));
   return Effect.gen(function* () {
-    const settingsMax = yield* read("rate_limit_max");
-    const settingsWindowMs = yield* read("rate_limit_window_ms");
-    const { max, windowMs } = resolveRateLimitFromDbValues({ settingsMax, settingsWindowMs });
+    const rows = yield* readAll;
+    const byKey = new Map(rows.map((row) => [row.key, row.value]));
+    const { max, windowMs } = resolveRateLimitFromDbValues({
+      settingsMax: byKey.get("rate_limit_max") ?? null,
+      settingsWindowMs: byKey.get("rate_limit_window_ms") ?? null,
+    });
     apiRateLimiter.setLimits({ max, windowMs });
   });
 }

@@ -52,6 +52,7 @@ import { assertMarkdownReady } from "./db/document-format";
 import type { DbDriver } from "./db/db";
 import {
   d1DatabaseToD1Like,
+  hasEnvMirrorCandidates,
   mirrorSettingsFromEnvAsync,
   stringEnvFromRuntimeEnv,
 } from "./api/workers-ports";
@@ -158,15 +159,28 @@ function ensureBoot(env: WorkersEnv): Promise<void> {
           "[Email] EMAIL binding is configured but LXK_EMAIL_FROM / LXK_PUBLIC_URL is missing, invalid, or not HTTPS — email delivery is disabled"
         );
       }
+      const envStrings = stringEnvFromRuntimeEnv(runtimeEnv);
       await Effect.runPromise(
         Effect.gen(function* () {
-          const mirrored = yield* mirrorSettingsFromEnvAsync(driver, stringEnvFromRuntimeEnv(runtimeEnv));
-          if (mirrored.length > 0) console.log(`Settings mirrored from env: ${mirrored.join(", ")}`);
-          yield* syncRateLimitFromDbAsync(driver);
-          yield* syncGitHubConfigFromDbAsync(driver, runtimeEnv);
-          // Per-isolate first request is the Workers "boot": the one-way
-          // provider-key backfill runs here, after the DB config sync.
-          yield* backfillProviderSecrets(driver, runtimeEnv);
+          // The env→DB mirror only has work when the install provisions
+          // values. Keeping it first preserves first-boot semantics, and
+          // skipping it when empty drops its reads from every cold isolate.
+          if (hasEnvMirrorCandidates(envStrings)) {
+            const mirrored = yield* mirrorSettingsFromEnvAsync(driver, envStrings);
+            if (mirrored.length > 0) console.log(`Settings mirrored from env: ${mirrored.join(", ")}`);
+          }
+          // These hydrate independent module-scope holders (rate limiter,
+          // GitHub config, provider secrets). Concurrent execution makes boot
+          // cost the slowest sync, not their sum — one D1 round trip per
+          // table instead of a serial chain before the first request routes.
+          yield* Effect.all(
+            [
+              syncRateLimitFromDbAsync(driver),
+              syncGitHubConfigFromDbAsync(driver, runtimeEnv),
+              backfillProviderSecrets(driver, runtimeEnv),
+            ],
+            { concurrency: "unbounded", discard: true }
+          );
         }).pipe(Effect.catchAll((e) => Effect.sync(() => console.error("[Workers] boot sync failed:", String(e)))))
       );
       // Boot-time stale assistant-task sweep (ADR-0005 §Reliability backstop):
