@@ -101,6 +101,7 @@ export interface WorkerConfigJson {
   ai?: Record<string, unknown>;
   send_email?: unknown;
   triggers?: Record<string, unknown>;
+  placement?: Record<string, unknown>;
   observability?: Record<string, unknown>;
 }
 
@@ -445,6 +446,9 @@ export function buildUpgradeConfig(
   // Preserve the scheduled tick (prune + R2 backup retention); derive it from
   // root when a prior config lacks it (older installs).
   const triggers = prior.triggers ?? root?.triggers;
+  // Placement is declared by the release's root config; keep a prior value
+  // only when the new tarball declares none (older releases).
+  const placement = root?.placement ?? prior.placement;
   const main = opts.bundle.main ?? prior.main ?? "index.js";
   const config: WorkerConfigJson = {
     name: prior.name,
@@ -474,6 +478,7 @@ export function buildUpgradeConfig(
   const migrations = buildChatSupervisorMigrations(buildDoRemovalMigrations(prior) ?? []);
   if (migrations.length > 0) config.migrations = migrations;
   if (triggers !== undefined) config.triggers = triggers;
+  if (placement !== undefined) config.placement = placement;
   return config;
 }
 

@@ -7,6 +7,8 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.14.0] - 2026-11-06
+
 ### Added
 
 - **Transactional email on Cloudflare Workers.** Self-service password
@@ -36,6 +38,26 @@ All notable changes to Lexa are documented here. Format based on
   not inbox delivery: actual quota, SPF/DKIM/DMARC, and Gmail/Outlook receipt
   are manual rollout checks, and local `wrangler dev` only simulates sends.
 
+### Fixed
+
+- **Workers cold-isolate boot latency.** The three per-isolate config syncs
+  (rate-limit settings, GitHub app/secrets, provider-key backfill) now run
+  concurrently, and each source table is read with one `IN` query instead of
+  a serial chain. Production telemetry showed ~8 D1 round trips before the
+  first route ran — 1.5 s cron p50 and 0.6–2.5 s API p50 with under 50 ms of
+  CPU. The env→DB mirror is skipped when the install provisions no values.
+- **Workers placement.** Smart Placement is replaced by a deterministic
+  Jakarta hint (`placement.region = gcp:asia-southeast2`): D1's primary runs
+  in APAC and the target edge is Jakarta + Singapore, while a learned
+  placement can stay `INSUFFICIENT_INVOCATIONS` at this traffic volume.
+  Placement applies to `fetch` only; the scheduled tick is unaffected.
+  `buildDeployConfig` carries `placement` so installer and CLI deploys keep
+  it. Singapore is a one-line alternative (`aws:ap-southeast-1`).
+- **Milestone board reads.** Sprint and task counts now come from grouped
+  aggregates joined once instead of four correlated subqueries per milestone
+  (6.2k rows read per board load, 58% of all D1 rows read).
+- **Ticket-key lookups.** `idx_tasks_key` indexes `tasks(key)`, so `PREFIX-n`
+  route params no longer scan the tasks table.
 
 ## [2026.13.0] - 2026-10-28
 

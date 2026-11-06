@@ -444,6 +444,34 @@ describe("worker upgrade DO removal migration (ADR-0005)", () => {
     expect(rebuiltNever.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["LexaChatSupervisor"] }]);
     expect(rebuiltNever.durable_objects).toEqual(SUPERVISOR_DO);
   });
+
+  it("carries placement from the release root config and falls back to the prior deploy", () => {
+    const rootPlacement = { region: "gcp:asia-southeast2" };
+    const fromRoot = buildUpgradeConfig(priorConfig(), {
+      version: "2.0.0",
+      publicUrl: "https://lexa.example.workers.dev",
+      bundle: BUNDLE,
+      root: { placement: rootPlacement },
+    });
+    expect(fromRoot.placement).toEqual(rootPlacement);
+
+    const priorPlacement = { mode: "smart" };
+    const overridden = buildUpgradeConfig(priorConfig({ placement: priorPlacement }), {
+      version: "2.0.0",
+      publicUrl: "https://lexa.example.workers.dev",
+      bundle: BUNDLE,
+      root: { placement: rootPlacement },
+    });
+    expect(overridden.placement).toEqual(rootPlacement);
+
+    const kept = buildUpgradeConfig(priorConfig({ placement: priorPlacement }), {
+      version: "2.0.0",
+      publicUrl: "https://lexa.example.workers.dev",
+      bundle: BUNDLE,
+      root: {},
+    });
+    expect(kept.placement).toEqual(priorPlacement);
+  });
 });
 
 describe("migration pre-flight ordering", () => {
