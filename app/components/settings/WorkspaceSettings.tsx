@@ -95,8 +95,8 @@ function LinkCopyModal({ title, link, email, onDone, restoreFocus }: {
             <div className="field-hint-danger" role="alert">Could not copy. Select and copy the link.</div>
           )}
           <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onDone}>Close</button>
-            <button type="button" className="btn btn-primary" onClick={handleCopy}>
+            <button type="button" className="btn btn-ghost" style={{ height: 44 }} onClick={onDone}>Close</button>
+            <button type="button" className="btn btn-primary" style={{ height: 44 }} onClick={handleCopy}>
               {copied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
               {copied ? "Copied to clipboard" : "Copy link"}
             </button>
