@@ -15,7 +15,7 @@ import {
   useCreateSwimlane,
   useUpdateRateLimit, useClearGithubSettings,
   useRestoreWikiRevision, useRevisions, wikiKeys,
-  useSignIn, useRevokeWorkspaceInvite, useCreateWorkspaceInvite,
+  useSignIn, useRevokeWorkspaceInvite, useCreateWorkspaceInvite, useSetPassword,
 } from "./queries";
 import { useUpdateTeam } from "./queries/team";
 import { settleThreadCache } from "../components/chat/assistant-chat-logic";
@@ -425,6 +425,20 @@ describe("session + invite mutation paths (LX-100/LX-102/LX-103)", () => {
     // that authoritative row, so immediate revoke targets it.
     expect(queryClient.getQueryData<WorkspaceInvite[]>(["workspace-invites"])).toEqual([invite]);
     expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it("useSetPassword writes the signed-out session read on success — no session seed, no invalidation", async () => {
+    // The reset revokes the requester's sessions server-side; the client cache
+    // must say signed-out immediately instead of riding the stale signed-in
+    // read for the documented cache window.
+    const signedIn: SessionResponse = { session: { id: "s1", userId: "u1", expiresAt: "t", createdAt: "t" }, user: USER };
+    queryClient.setQueryData<SessionResponse>(["session"], signedIn);
+    routes.set("POST /api/auth/reset-password", { status: true });
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    const setPassword = renderHook(() => useSetPassword(), { wrapper });
+    await act(async () => { await setPassword.result.current.mutateAsync({ newPassword: "new-password", token: "tok" }); });
+    expect(queryClient.getQueryData<SessionResponse>(["session"])).toEqual({ session: null, user: null });
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 
