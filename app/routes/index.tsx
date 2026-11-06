@@ -67,12 +67,14 @@ function Home() {
       <div className="tm-dash-head">
         <h1>Projects</h1>
         <span className="nav-spacer" />
-        <div className="flex items-center gap-3">
-          <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            <Plus size={14} strokeWidth={1.5} />
-            New Project
-          </button>
-        </div>
+        {!isEmpty && (
+          <div className="flex items-center gap-3">
+            <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
+              <Plus size={14} strokeWidth={1.5} />
+              New Project
+            </button>
+          </div>
+        )}
       </div>
 
       {needsSetup && (
@@ -89,16 +91,20 @@ function Home() {
       {createProject.error && <div className="dashboard-error">{(createProject.error as Error).message}</div>}
 
       {isEmpty ? (
-        <div className="tm-void" style={{ marginTop: 12, minHeight: 300, justifyContent: "center" }}>
-          <span className="tm-void-title">No projects yet</span>
-          <LayoutGrid size={24} strokeWidth={1.5} aria-hidden="true" />
-          <span style={{ maxWidth: 360 }}>
-            Create your first project to start tracking tasks, columns, and wiki pages, with optional two-way GitHub sync.
-          </span>
-          <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            <Plus size={14} strokeWidth={1.5} aria-hidden="true" />
-            New Project
-          </button>
+        <div className="tm-projects-empty">
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <LayoutGrid size={24} strokeWidth={1.5} aria-hidden="true" />
+            </div>
+            <div className="empty-state-title">No projects yet</div>
+            <div className="empty-state-desc">
+              Create your first project to get its board, tasks, milestones, and wiki.
+            </div>
+            <button type="button" className="btn btn-primary btn-lg mt-4" onClick={() => setShowCreate(true)}>
+              <Plus size={14} strokeWidth={1.5} aria-hidden="true" />
+              New Project
+            </button>
+          </div>
         </div>
       ) : (
         <div className="project-cards mt-4">
