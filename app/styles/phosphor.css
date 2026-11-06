@@ -10328,6 +10328,14 @@ select.prop-input,
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 16px;
 }
+/* No projects yet: the grid's own plate, so the void reads as the trailhead
+   waiting for its first card rather than a stray dashed box on the map. */
+.tm-projects-empty {
+  margin-top: 16px;
+  background: var(--lx-surface-panel);
+  border: 1px solid var(--lx-border-default);
+  border-radius: var(--lx-radius-panel);
+}
 .project-card {
   display: flex;
   flex-direction: column;
