@@ -7,6 +7,8 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.14.2] - 2026-11-06
+
 ### Changed
 
 - **Leaner Workers cold start and isolate memory.** The Workers entry now loads
