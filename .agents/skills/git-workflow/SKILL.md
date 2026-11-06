@@ -39,9 +39,8 @@ Violation = stop and ask the user. Never silent-fallback.
 ## 2. Branching — single trunk (`main`)
 
 - `main` is single trunk — never commit directly. Every change (feat/fix/chore/docs/refactor, even 1-line) starts from `main` in a separate branch, then PR → merge to `main`. No exceptions — `chore(release)` and hotfixes also go via branch + PR.
-- Branch naming:
-  - Worktree lanes (preferred for parallel/risky work): `omos/<slug>` → path `.worktrees/<slug>`.
-  - Simple fix/feature (single lane, low risk): `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>` — kebab-case, short.
+- Branch naming (kebab-case, short):
+  - All branches, worktree lanes included: `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`. A worktree lane uses the same branch form at path `.worktrees/<slug>`.
   - Swarm lanes: branch per lane slug (orchestrator assigns).
   - Release branch: `chore/release-vX.Y.Z` (or `release/<version>`) → PR to `main`, tag after merge (see §7).
 - Flow: `git checkout main && git pull && git checkout -b <branch>` (or `git worktree add -b <branch> .worktrees/<slug> main`). Keep the branch rebased on `main` if trunk moves: `git fetch && git rebase origin/main` (or merge `main` into the branch) — never rewrite `main`.

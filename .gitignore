@@ -28,9 +28,6 @@ skills-lock.json
 # Vendored Effect source for the effect-ts skill (version-pinned by scripts/prepare-effect.sh)
 .repos/
 
-# Deepwork session state (git-local, OpenCode-readable)
-.slim/deepwork/
-
 # lexa-swarm lane status files (heartbeats, PLAN.md) — ephemeral orchestration state
 status/
 
@@ -44,8 +41,7 @@ status/
 # Staging Workers deploy config — filled copy of wrangler.staging.example.jsonc
 /wrangler.staging.local.jsonc
 
-# Slim worktrees — local orchestration checkouts, never commit
-.slim/worktrees/
+# Worktrees — local orchestration checkouts, never commit
 .worktrees/
 
 # Review artifacts (HTML reports from review lanes) — never commit

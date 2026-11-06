@@ -47,7 +47,7 @@ const SCAN_DIRS = ["server", "app", "migrations", "cli/src", "shared"];
 
 const EXCLUDE_DIRS = new Set([
   "node_modules", "dist", "build", ".turbo", ".next", ".git",
-  "wireframes", "data", "coverage", ".slim", ".superpowers", ".opencode",
+  "wireframes", "data", "coverage", ".superpowers", ".opencode",
   ".playwright-mcp", ".tanstack", ".commandcode", ".agents", ".repos",
 ]);
 
