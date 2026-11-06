@@ -19,10 +19,10 @@ function computeRowBottoms(
   let rows = 0;
   const bump = () => { rows++; };
   for (const m of milestones) {
-    if (m.archivedAt || collapsedGroups.has(m.id)) continue;
+    if (collapsedGroups.has(m.id)) continue;
     bump(); // group row
     for (const l of lanes) {
-      if (l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt)) {
+      if (l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt)) {
         bump();
         map.set(l.lane.id, rows);
       }
@@ -122,12 +122,18 @@ interface DragRef {
 
 export function GanttChart({ lanes, milestones, today, onRescheduleLane, onRescheduleMilestone, onOpenBoard, onShowMilestoneList }: GanttChartProps) {
   const todayDate = parseDay(today);
+  // Overall timeline: archived milestones keep their position order but sit
+  // after the live groups, so current work stays at the top.
+  const orderedMilestones = useMemo(
+    () => milestones.toSorted((a, b) => Number(!!a.archivedAt) - Number(!!b.archivedAt)),
+    [milestones]
+  );
   const items = useMemo(
     () => [
       ...lanes.map((l) => ({ startAt: l.lane.startAt, dueAt: l.lane.dueAt })),
-      ...milestones.map((m) => ({ startAt: null as string | null, dueAt: m.dueAt })),
+      ...orderedMilestones.map((m) => ({ startAt: null as string | null, dueAt: m.dueAt })),
     ],
-    [lanes, milestones]
+    [lanes, orderedMilestones]
   );
   // Measure the container width so the day grid can extend to fill it (no
   // empty dark space on the right). The grid ends flush at the container's
@@ -265,30 +271,30 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
     return m.dueAt;
   };
 
-  const activeMilestones = milestones.filter((m) => !m.archivedAt && m.dueAt);
-  const milestoneNameById = useMemo(() => new Map(milestones.map((m) => [m.id, m.name])), [milestones]);
-  const looseLanes = lanes.filter((l) => !l.lane.archivedAt && !l.lane.milestoneId && l.lane.kind === "sprint" && (l.lane.startAt || l.lane.dueAt));
+  const datedMilestones = orderedMilestones.filter((m) => !!m.dueAt);
+  const milestoneNameById = useMemo(() => new Map(orderedMilestones.map((m) => [m.id, m.name])), [orderedMilestones]);
+  const looseLanes = lanes.filter((l) => !l.lane.milestoneId && l.lane.kind === "sprint" && (l.lane.startAt || l.lane.dueAt));
   const backlogLanes = lanes.filter((l) => l.lane.kind === "backlog");
-  const hasCanvasItems = lanes.some((l) => !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt)) || activeMilestones.length > 0;
+  const hasCanvasItems = lanes.some((l) => l.lane.startAt || l.lane.dueAt) || datedMilestones.length > 0;
 
   // Sprint rows in render order (bars fill their full cell height).
   const sprintPlan = useMemo(() => {
     const plan: TimelineLane[] = [];
     const add = (t: TimelineLane) => plan.push(t);
-    for (const m of milestones) {
-      if (m.archivedAt || collapsedGroups.has(m.id)) continue;
+    for (const m of orderedMilestones) {
+      if (collapsedGroups.has(m.id)) continue;
       for (const l of lanes) {
-        if (l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt)) add(l);
+        if (l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt)) add(l);
       }
     }
     if (!collapsedGroups.has("__loose__")) for (const l of looseLanes) add(l);
     return plan;
-  }, [lanes, milestones, collapsedGroups, looseLanes, activeMilestones]);
+  }, [lanes, orderedMilestones, collapsedGroups, looseLanes]);
 
   // Sprint range guidelines — canvas-level (like the TODAY line): one dashed
   // vertical per start/end edge. Preview-aware so they follow a drag.
   const ROW_H = 56; // .tl-lane height (border-box) — matches .tl-row
-  const rowBottoms = computeRowBottoms(milestones, lanes, looseLanes, backlogLanes, collapsedGroups);
+  const rowBottoms = computeRowBottoms(orderedMilestones, lanes, looseLanes, backlogLanes, collapsedGroups);
   const guidelineXs = computeGuidelineXs(sprintPlan, rowBottoms, barFor, axisStart, to, ROW_H);
 
   const gridCols = `${LABEL_W}px repeat(${days.length}, ${DAY_WIDTH_PX}px)`;
@@ -410,8 +416,7 @@ function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes,
         <span key={i} className="tl-guideline" style={{ left: g.left + LABEL_W, top: -22, bottom: g.bottom }} aria-hidden="true" />
       ))}
       {milestones.map((m) => {
-        if (m.archivedAt) return null;
-        const sprints = lanes.filter((l) => l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt));
+        const sprints = lanes.filter((l) => l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt));
         const due = milestoneDue(m);
         const collapsed = collapsedGroups.has(m.id);
         return (
@@ -516,13 +521,14 @@ function sprintFillPct(t: TimelineLane) {
   return t.total > 0 ? Math.round((t.done / t.total) * 100) : 0;
 }
 
-function SprintRangeBar({ t, startAt, dueAt, axisStart, to, today, onPointerDown, onPointerMove, onPointerUp, onOpenBoard, isJustDragged }: {
+function SprintRangeBar({ t, startAt, dueAt, axisStart, to, today, archived, onPointerDown, onPointerMove, onPointerUp, onOpenBoard, isJustDragged }: {
   t: TimelineLane;
   startAt: string;
   dueAt: string;
   axisStart: Date;
   to: Date;
   today: Date;
+  archived: boolean;
   onPointerDown: (e: React.PointerEvent, mode: "body" | "edge") => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: () => void;
@@ -535,29 +541,33 @@ function SprintRangeBar({ t, startAt, dueAt, axisStart, to, today, onPointerDown
   // +DAY_WIDTH_PX so the bar covers the end day's column (Aug 18→21 spans
   // the 18,19,20,21 columns — not stopping at the left edge of 21).
   const w = Math.max(xForDay(e2, axisStart) - x + DAY_WIDTH_PX, DAY_WIDTH_PX);
-  const overdue = parseDay(dueAt) < today;
+  const overdue = !archived && parseDay(dueAt) < today;
   const fillPct = sprintFillPct(t);
   return (
     <button
       type="button"
-      className={cn("tl-bar", overdue && "overdue")}
+      className={cn("tl-bar", archived && "archived", overdue && "overdue")}
       style={{ left: x, width: w, touchAction: "none" }}
-      title={`${t.lane.name} — drag body = shift · right edge = resize end`}
+      title={archived ? `${t.lane.name} (archived)` : `${t.lane.name} — drag body = shift · right edge = resize end`}
+      disabled={archived}
       {...sprintBarHandlers(onPointerDown, onPointerMove, onPointerUp, onOpenBoard, isJustDragged, t.lane.id)}
     >
       <span className="tl-fill" style={{ width: `${fillPct}%` }} />
-      <span className="tl-bar-label">{t.lane.name}</span>
-      <span className="tl-resize-edge" onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e, "edge"); }} />
+      {!archived && <span className="tl-bar-label">{t.lane.name}</span>}
+      {!archived && (
+        <span className="tl-resize-edge" onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e, "edge"); }} />
+      )}
     </button>
   );
 }
 
-function SprintStartBar({ t, startAt, axisStart, to, today, onPointerDown, onPointerMove, onPointerUp, onOpenBoard, isJustDragged }: {
+function SprintStartBar({ t, startAt, axisStart, to, today, archived, onPointerDown, onPointerMove, onPointerUp, onOpenBoard, isJustDragged }: {
   t: TimelineLane;
   startAt: string;
   axisStart: Date;
   to: Date;
   today: Date;
+  archived: boolean;
   onPointerDown: (e: React.PointerEvent, mode: "body" | "edge") => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: () => void;
@@ -572,25 +582,26 @@ function SprintStartBar({ t, startAt, axisStart, to, today, onPointerDown, onPoi
   return (
     <button
       type="button"
-      className="tl-bar"
+      className={cn("tl-bar", archived && "archived")}
       style={{ left: x, width: w, touchAction: "none", borderRightStyle: "dashed" }}
-      title="Start only — bar runs to today (live edge)"
+      title={archived ? `${t.lane.name} (archived)` : "Start only — bar runs to today (live edge)"}
+      disabled={archived}
       {...sprintBarHandlers(onPointerDown, onPointerMove, onPointerUp, onOpenBoard, isJustDragged, t.lane.id)}
     >
       <span className="tl-fill" style={{ width: `${fillPct}%` }} />
-      <span className="tl-bar-label">{t.lane.name}</span>
+      {!archived && <span className="tl-bar-label">{t.lane.name}</span>}
     </button>
   );
 }
 
-function SprintDueMarker({ dueAt, axisStart, to }: { dueAt: string; axisStart: Date; to: Date }) {
+function SprintDueMarker({ dueAt, axisStart, to, archived }: { dueAt: string; axisStart: Date; to: Date; archived: boolean }) {
   return (
     <span
-      className="tl-marker"
+      className={cn("tl-marker", archived && "archived")}
       style={{ left: xForDay(clampDate(parseDay(dueAt), axisStart, to), axisStart) + DAY_WIDTH_PX / 2 }}
-      title="End only — ◆ marker until start set"
+      title={archived ? "Archived: end date is historical" : "End only — ◆ marker until start set"}
     >
-      <span className="tl-marker-flag">Ends {shortDate(dueAt)} · no start yet — set dates in swimlane settings</span>
+      <span className="tl-marker-flag">{archived ? `Archived · ended ${shortDate(dueAt)}` : `Ends ${shortDate(dueAt)} · no start yet — set dates in swimlane settings`}</span>
     </span>
   );
 }
@@ -612,22 +623,23 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
   milestoneName?: string | undefined;
 }) {
   const { startAt, dueAt } = bar;
+  const archived = !!t.lane.archivedAt;
   const [hovered, setHovered] = useState(false);
 
   let body: React.ReactNode = null;
   if (startAt && dueAt) {
-    body = <SprintRangeBar t={t} startAt={startAt} dueAt={dueAt} axisStart={axisStart} to={to} today={today} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onOpenBoard={onOpenBoard} isJustDragged={isJustDragged} />;
+    body = <SprintRangeBar t={t} startAt={startAt} dueAt={dueAt} axisStart={axisStart} to={to} today={today} archived={archived} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onOpenBoard={onOpenBoard} isJustDragged={isJustDragged} />;
   } else if (startAt) {
-    body = <SprintStartBar t={t} startAt={startAt} axisStart={axisStart} to={to} today={today} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onOpenBoard={onOpenBoard} isJustDragged={isJustDragged} />;
+    body = <SprintStartBar t={t} startAt={startAt} axisStart={axisStart} to={to} today={today} archived={archived} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onOpenBoard={onOpenBoard} isJustDragged={isJustDragged} />;
   } else if (dueAt) {
-    body = <SprintDueMarker dueAt={dueAt} axisStart={axisStart} to={to} />;
+    body = <SprintDueMarker dueAt={dueAt} axisStart={axisStart} to={to} archived={archived} />;
   }
 
   const dateLabel = ganttDateLabel(startAt, dueAt);
   const barLeft = startAt ? xForDay(clampDate(parseDay(startAt), axisStart, to), axisStart) : 0;
 
   return (
-    <div className={cn("tl-row", striped && "striped")} style={{ gridTemplateColumns: gridCols }}>
+    <div className={cn("tl-row", striped && "striped", archived && "archived")} style={{ gridTemplateColumns: gridCols }}>
       <div className="tl-label sprint">
         {t.lane.name}
         {dateLabel && <span className="sl-dates" style={{ marginLeft: 8, fontFamily: "var(--lx-font-micro)", fontSize: 11, color: "var(--lx-text-secondary)" }}>{dateLabel}</span>}
@@ -688,9 +700,10 @@ function MilestoneGroupRow({ m, sprints, due, axisStart, collapsed, striped, gri
   renderSprint: (t: TimelineLane) => React.ReactNode;
 }) {
   const dueChip = due ? formatDueChip(due) : null;
+  const archived = !!m.archivedAt;
   return (
     <div>
-      <div className={cn("tl-row", striped && "striped")} style={{ gridTemplateColumns: gridCols }}>
+      <div className={cn("tl-row", striped && "striped", archived && "archived")} style={{ gridTemplateColumns: gridCols }}>
         <button
           type="button"
           className={cn("tl-label group tl-group-toggle")}
@@ -699,23 +712,28 @@ function MilestoneGroupRow({ m, sprints, due, axisStart, collapsed, striped, gri
         >
           <svg className={cn("chevron", collapsed && "collapsed")} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
           <span className="tl-label-name">{m.name}</span>
-          <span className="lane-ready" style={{ marginLeft: 6 }}>
-            {m.archivedSprintCount}/{m.sprintCount} sprints archived
-          </span>
+          {archived ? (
+            <span className="tl-archived-tag">Archived</span>
+          ) : (
+            <span className="lane-ready" style={{ marginLeft: 6 }}>
+              {m.archivedSprintCount}/{m.sprintCount} sprints archived
+            </span>
+          )}
         </button>
         <div className="tl-lane group">
           {due && (
             <button
               type="button"
-              className={cn("tl-marker", dueChip?.overdue && "overdue")}
+              className={cn("tl-marker", !archived && dueChip?.overdue && "overdue")}
               style={{ left: xForDay(parseDay(due), axisStart) + DAY_WIDTH_PX / 2 }}
-              title="Due — drag to reschedule"
+              title={archived ? "Archived: due date is historical" : "Due — drag to reschedule"}
+              disabled={archived}
               onPointerDown={onMarkerPointerDown}
               onPointerMove={onMarkerPointerMove}
               onPointerUp={onMarkerPointerUp}
               onClick={onMarkerClick}
             >
-              <span className="tl-marker-flag">{dueChip?.overdue ? `Due ${dueChip.text} · Overdue · drag ◆ = move due date` : `${dueChip?.text} · drag ◆ = move due date`}</span>
+              <span className="tl-marker-flag">{archived ? `Archived · ended ${shortDate(due)}` : dueChip?.overdue ? `Due ${dueChip.text} · Overdue · drag ◆ = move due date` : `${dueChip?.text} · drag ◆ = move due date`}</span>
             </button>
           )}
         </div>

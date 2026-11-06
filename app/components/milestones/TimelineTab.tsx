@@ -8,11 +8,10 @@ import { MilestoneForm } from "./MilestoneForm";
 import { SwimlaneForm } from "../kanban/SwimlaneForm";
 import { DeleteSwimlaneDialog } from "../swimlanes/DeleteSwimlaneDialog";
 
-export function TimelineTab({ slug, board, milestones }: { slug: string; board: Board | undefined; milestones: Milestone[] }) {
+export function TimelineTab({ slug, milestones }: { slug: string; milestones: Milestone[] }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { data: boardData } = useBoard(slug);
-  const b = board ?? boardData;
+  const { data: b } = useBoard(slug, true);
   const updateSwimlane = useUpdateSwimlane(slug);
   const updateMilestone = useUpdateMilestone(slug);
   const deleteMilestone = useDeleteMilestone(slug);
@@ -26,7 +25,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
     if (!b) return [];
     const out: TimelineLane[] = [];
     for (const lane of b.swimlanes) {
-      if (lane.archivedAt || (lane.kind !== "sprint" && lane.kind !== "backlog")) continue;
+      if (lane.kind !== "sprint" && lane.kind !== "backlog") continue;
       out.push({ lane, done: lane.tasksDone, total: lane.tasksTotal });
     }
     return out;
@@ -82,10 +81,11 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
     );
   };
 
-  const hasCanvasItems = b?.swimlanes.some((l) => !l.archivedAt && (l.startAt || l.dueAt)) ||
-    milestones.some((m) => !m.archivedAt && m.dueAt);
+  const hasCanvasItems = b?.swimlanes.some((l) => l.startAt || l.dueAt) ||
+    milestones.some((m) => m.dueAt);
 
-  const unsetLanes = lanes.filter((l) => l.lane.kind !== "backlog" && !l.lane.startAt && !l.lane.dueAt);
+  // UNSET is a scheduling aid: archived items are history, not work to schedule.
+  const unsetLanes = lanes.filter((l) => l.lane.kind !== "backlog" && !l.lane.archivedAt && !l.lane.startAt && !l.lane.dueAt);
   const unsetMilestones = milestones.filter((m) => !m.archivedAt && !m.dueAt);
 
   if (!b) return null;

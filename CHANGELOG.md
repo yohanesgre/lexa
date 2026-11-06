@@ -7,6 +7,13 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Added
+
+- **Milestones archive toggle and overall timeline.** Archived milestones now
+  sit behind a collapsible section header with a count (collapsed by default),
+  and the timeline includes archived milestones and sprints as dimmed,
+  read-only history so the gantt covers the whole project.
+
 ## [2026.14.3] - 2026-11-07
 
 ### Added

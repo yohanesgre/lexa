@@ -5834,6 +5834,30 @@
   font-weight: 500;
 }
 
+/* Archived section toggle. The micro label is the section heading; the
+   chevron and count make it the control that reveals or hides the grid. */
+.ms-archive-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 20px 0 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  min-height: 28px;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+}
+.ms-archive-toggle:hover { color: var(--lx-text-primary); }
+.ms-archive-count { color: var(--lx-text-tertiary); }
+@media (max-width: 767px) {
+  .ms-archive-toggle { min-height: 44px; }
+}
+
 .milestone-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
@@ -6143,6 +6167,27 @@
 .tl-row.striped {
   background: var(--lx-surface-elevated);
 }
+/* Archived rows are history: dim the label, keep the grid crisp, and leave
+   the bar's own archived treatment to .tl-bar.archived. */
+.tl-row.archived .tl-label {
+  opacity: 0.7;
+}
+.tl-archived-tag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 9999px;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
 .tl-label {
   display: flex;
   align-items: center;
@@ -6226,6 +6271,7 @@
 .tl-bar.overdue { border-color: rgba(192, 57, 43, 0.5); }
 .tl-bar.overdue .tl-fill { background: var(--lx-text-danger); }
 .tl-bar.archived { opacity: 0.45; }
+.tl-bar:disabled { cursor: default; }
 /* In-bar sprint name chip — chip bg mirrors the bar surface so it only
    becomes visible against the progress fill; pointer-events pass through
    to the bar's drag/resize handles. */
@@ -6274,6 +6320,12 @@
 .tl-marker.overdue {
   background: var(--lx-text-danger);
   box-shadow: 0 0 0 2px var(--lx-surface-card), 0 0 0 3px rgba(192, 57, 43, 0.5), 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+.tl-marker.archived { opacity: 0.45; cursor: default; }
+.tl-marker:disabled {
+  background: var(--lx-text-muted);
+  box-shadow: 0 0 0 2px var(--lx-surface-card), 0 0 0 3px var(--lx-border-default);
+  cursor: default;
 }
 .tl-marker .tl-marker-flag {
   display: none;
