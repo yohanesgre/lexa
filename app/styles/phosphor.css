@@ -6321,7 +6321,12 @@
   background: var(--lx-text-danger);
   box-shadow: 0 0 0 2px var(--lx-surface-card), 0 0 0 3px rgba(192, 57, 43, 0.5), 0 2px 6px rgba(0, 0, 0, 0.45);
 }
-.tl-marker.archived { opacity: 0.45; cursor: default; }
+.tl-marker.archived {
+  background: var(--lx-text-muted);
+  box-shadow: 0 0 0 2px var(--lx-surface-card), 0 0 0 3px var(--lx-border-default);
+  opacity: 0.55;
+  cursor: default;
+}
 .tl-marker:disabled {
   background: var(--lx-text-muted);
   box-shadow: 0 0 0 2px var(--lx-surface-card), 0 0 0 3px var(--lx-border-default);
