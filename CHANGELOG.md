@@ -5,7 +5,7 @@ All notable changes to Lexa are documented here. Format based on
 [Calendar Versioning](https://calver.org/) (`YYYY.MINOR.MICRO` — see
 `docs/RELEASING.md`).
 
-## [Unreleased]
+## [2026.15.0] - 2026-11-07
 
 ### Added
 
