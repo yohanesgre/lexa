@@ -22,7 +22,7 @@ function computeRowBottoms(
     if (collapsedGroups.has(m.id)) continue;
     bump(); // group row
     for (const l of lanes) {
-      if (l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt)) {
+      if (l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt || l.lane.archivedAt)) {
         bump();
         map.set(l.lane.id, rows);
       }
@@ -130,8 +130,14 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
   );
   const items = useMemo(
     () => [
-      ...lanes.map((l) => ({ startAt: l.lane.startAt, dueAt: l.lane.dueAt })),
-      ...orderedMilestones.map((m) => ({ startAt: null as string | null, dueAt: m.dueAt })),
+      ...lanes.map((l) => ({
+        startAt: l.lane.startAt,
+        dueAt: l.lane.dueAt ?? (l.lane.archivedAt ? l.lane.archivedAt.slice(0, 10) : null),
+      })),
+      ...orderedMilestones.map((m) => ({
+        startAt: null as string | null,
+        dueAt: m.dueAt ?? (m.archivedAt ? m.archivedAt.slice(0, 10) : null),
+      })),
     ],
     [lanes, orderedMilestones]
   );
@@ -167,7 +173,9 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
   const [dragMode, setDragMode] = useState<DragMode | null>(null);
   const [lanePreview, setLanePreview] = useState<{ id: string; startAt: string | null; dueAt: string | null } | null>(null);
   const [milestonePreview, setMilestonePreview] = useState<{ id: string; dueAt: string } | null>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(
+    () => new Set(milestones.filter((m) => !!m.archivedAt).map((m) => m.id))
+  );
 
   const toggleGroup = (id: string) =>
     setCollapsedGroups((prev) => {
@@ -263,19 +271,22 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
   const barFor = (laneId: string) => {
     if (lanePreview?.id === laneId) return { startAt: lanePreview.startAt, dueAt: lanePreview.dueAt };
     const lane = lanes.find((l) => l.lane.id === laneId);
-    return { startAt: lane?.lane.startAt ?? null, dueAt: lane?.lane.dueAt ?? null };
+    return {
+      startAt: lane?.lane.startAt ?? null,
+      dueAt: lane?.lane.dueAt ?? (lane?.lane.archivedAt ? lane.lane.archivedAt.slice(0, 10) : null),
+    };
   };
 
   const milestoneDue = (m: Milestone): string | null => {
     if (milestonePreview?.id === m.id) return milestonePreview.dueAt;
-    return m.dueAt;
+    return m.dueAt ?? (m.archivedAt ? m.archivedAt.slice(0, 10) : null);
   };
 
-  const datedMilestones = orderedMilestones.filter((m) => !!m.dueAt);
+  const timelineMilestones = orderedMilestones.filter((m) => m.dueAt || m.archivedAt);
   const milestoneNameById = useMemo(() => new Map(orderedMilestones.map((m) => [m.id, m.name])), [orderedMilestones]);
-  const looseLanes = lanes.filter((l) => !l.lane.milestoneId && l.lane.kind === "sprint" && (l.lane.startAt || l.lane.dueAt));
+  const looseLanes = lanes.filter((l) => !l.lane.milestoneId && l.lane.kind === "sprint" && (l.lane.startAt || l.lane.dueAt || l.lane.archivedAt));
   const backlogLanes = lanes.filter((l) => l.lane.kind === "backlog");
-  const hasCanvasItems = lanes.some((l) => l.lane.startAt || l.lane.dueAt) || datedMilestones.length > 0;
+  const hasCanvasItems = lanes.some((l) => l.lane.startAt || l.lane.dueAt || l.lane.archivedAt) || timelineMilestones.length > 0;
 
   // Sprint rows in render order (bars fill their full cell height).
   const sprintPlan = useMemo(() => {
@@ -284,7 +295,7 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
     for (const m of orderedMilestones) {
       if (collapsedGroups.has(m.id)) continue;
       for (const l of lanes) {
-        if (l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt)) add(l);
+        if (l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt || l.lane.archivedAt)) add(l);
       }
     }
     if (!collapsedGroups.has("__loose__")) for (const l of looseLanes) add(l);
@@ -416,7 +427,7 @@ function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes,
         <span key={i} className="tl-guideline" style={{ left: g.left + LABEL_W, top: -22, bottom: g.bottom }} aria-hidden="true" />
       ))}
       {milestones.map((m) => {
-        const sprints = lanes.filter((l) => l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt));
+        const sprints = lanes.filter((l) => l.lane.milestoneId === m.id && (l.lane.startAt || l.lane.dueAt || l.lane.archivedAt));
         const due = milestoneDue(m);
         const collapsed = collapsedGroups.has(m.id);
         return (
@@ -594,14 +605,14 @@ function SprintStartBar({ t, startAt, axisStart, to, today, archived, onPointerD
   );
 }
 
-function SprintDueMarker({ dueAt, axisStart, to, archived }: { dueAt: string; axisStart: Date; to: Date; archived: boolean }) {
+function SprintDueMarker({ dueAt, axisStart, to, archived, derived }: { dueAt: string; axisStart: Date; to: Date; archived: boolean; derived: boolean }) {
   return (
     <span
       className={cn("tl-marker", archived && "archived")}
       style={{ left: xForDay(clampDate(parseDay(dueAt), axisStart, to), axisStart) + DAY_WIDTH_PX / 2 }}
-      title={archived ? "Archived: end date is historical" : "End only — ◆ marker until start set"}
+      title={derived ? "Archived: archival date" : archived ? "Archived: end date is historical" : "End only — ◆ marker until start set"}
     >
-      <span className="tl-marker-flag">{archived ? `Archived · ended ${shortDate(dueAt)}` : `Ends ${shortDate(dueAt)} · no start yet — set dates in swimlane settings`}</span>
+      <span className="tl-marker-flag">{derived ? `Archived ${shortDate(dueAt)}` : archived ? `Archived · ended ${shortDate(dueAt)}` : `Ends ${shortDate(dueAt)} · no start yet — set dates in swimlane settings`}</span>
     </span>
   );
 }
@@ -624,6 +635,7 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
 }) {
   const { startAt, dueAt } = bar;
   const archived = !!t.lane.archivedAt;
+  const derivedEnd = archived && !t.lane.dueAt && !!dueAt;
   const [hovered, setHovered] = useState(false);
 
   let body: React.ReactNode = null;
@@ -632,11 +644,16 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
   } else if (startAt) {
     body = <SprintStartBar t={t} startAt={startAt} axisStart={axisStart} to={to} today={today} archived={archived} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onOpenBoard={onOpenBoard} isJustDragged={isJustDragged} />;
   } else if (dueAt) {
-    body = <SprintDueMarker dueAt={dueAt} axisStart={axisStart} to={to} archived={archived} />;
+    body = <SprintDueMarker dueAt={dueAt} axisStart={axisStart} to={to} archived={archived} derived={derivedEnd} />;
   }
 
-  const dateLabel = ganttDateLabel(startAt, dueAt);
-  const barLeft = startAt ? xForDay(clampDate(parseDay(startAt), axisStart, to), axisStart) : 0;
+  const firstDay = startAt ?? dueAt;
+  const dateLabel = startAt
+    ? ganttDateLabel(startAt, dueAt)
+    : derivedEnd && dueAt
+      ? `archived ${shortDate(dueAt)}`
+      : ganttDateLabel(startAt, dueAt);
+  const barLeft = firstDay ? xForDay(clampDate(parseDay(firstDay), axisStart, to), axisStart) : 0;
 
   return (
     <div className={cn("tl-row", striped && "striped", archived && "archived")} style={{ gridTemplateColumns: gridCols }}>
@@ -651,7 +668,7 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
         onMouseLeave={() => setHovered(false)}
       >
         {body}
-        {hovered && startAt && (
+        {hovered && firstDay && (
           <div className="tl-tooltip" style={{ top: -16, left: barLeft + 8 }}>
             <div className="tt-title">{t.lane.name}</div>
             <div className="tt-line">{dateLabel} · {t.done}/{t.total} done</div>
@@ -701,6 +718,7 @@ function MilestoneGroupRow({ m, sprints, due, axisStart, collapsed, striped, gri
 }) {
   const dueChip = due ? formatDueChip(due) : null;
   const archived = !!m.archivedAt;
+  const derived = archived && !m.dueAt && !!due;
   return (
     <div>
       <div className={cn("tl-row", striped && "striped", archived && "archived")} style={{ gridTemplateColumns: gridCols }}>
@@ -709,6 +727,7 @@ function MilestoneGroupRow({ m, sprints, due, axisStart, collapsed, striped, gri
           className={cn("tl-label group tl-group-toggle")}
           onClick={onToggle}
           aria-expanded={!collapsed}
+          aria-label={archived && due ? `${m.name}, archived${derived ? ` ${shortDate(due)}` : `, due ${shortDate(due)}`}` : undefined}
         >
           <svg className={cn("chevron", collapsed && "collapsed")} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
           <span className="tl-label-name">{m.name}</span>
@@ -726,14 +745,14 @@ function MilestoneGroupRow({ m, sprints, due, axisStart, collapsed, striped, gri
               type="button"
               className={cn("tl-marker", !archived && dueChip?.overdue && "overdue")}
               style={{ left: xForDay(parseDay(due), axisStart) + DAY_WIDTH_PX / 2 }}
-              title={archived ? "Archived: due date is historical" : "Due — drag to reschedule"}
+              title={derived ? "Archived: archival date" : archived ? "Archived: due date is historical" : "Due — drag to reschedule"}
               disabled={archived}
               onPointerDown={onMarkerPointerDown}
               onPointerMove={onMarkerPointerMove}
               onPointerUp={onMarkerPointerUp}
               onClick={onMarkerClick}
             >
-              <span className="tl-marker-flag">{archived ? `Archived · ended ${shortDate(due)}` : dueChip?.overdue ? `Due ${dueChip.text} · Overdue · drag ◆ = move due date` : `${dueChip?.text} · drag ◆ = move due date`}</span>
+              <span className="tl-marker-flag">{derived ? `Archived ${shortDate(due)}` : archived ? `Archived · due ${shortDate(due)}` : dueChip?.overdue ? `Due ${dueChip.text} · Overdue · drag ◆ = move due date` : `${dueChip?.text} · drag ◆ = move due date`}</span>
             </button>
           )}
         </div>

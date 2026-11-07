@@ -81,8 +81,8 @@ export function TimelineTab({ slug, milestones }: { slug: string; milestones: Mi
     );
   };
 
-  const hasCanvasItems = b?.swimlanes.some((l) => l.startAt || l.dueAt) ||
-    milestones.some((m) => m.dueAt);
+  const hasCanvasItems = b?.swimlanes.some((l) => l.startAt || l.dueAt || l.archivedAt) ||
+    milestones.some((m) => m.dueAt || m.archivedAt);
 
   // UNSET is a scheduling aid: archived items are history, not work to schedule.
   const unsetLanes = lanes.filter((l) => l.lane.kind !== "backlog" && !l.lane.archivedAt && !l.lane.startAt && !l.lane.dueAt);
