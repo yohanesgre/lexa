@@ -971,6 +971,63 @@ Historically applied SQL migrations remain immutable. `0030` uses D1-supported c
 - Unsupported legacy rows block migration rather than losing content. Application rollout waits for format-complete guard.
 - Old binaries cannot safely read converted data; rollback restores the matching pre-upgrade backup with writes stopped.
 
+## ADR-RAG: Semantic retrieval over project content
+
+**Status:** Accepted  
+**Date:** 2026-11-16  
+**Deciders:** Project owner
+
+### Context
+
+Assistant retrieval was lexical only: `search_wiki` (FTS5), `search_tasks`
+(title-substring only — descriptions invisible), and project-memory FTS with
+naive keyword extraction. Paraphrase queries with no term overlap missed the
+target, and task bodies were unreachable by search. The corpus stays
+project-scoped and small (≤10k chunks/project).
+
+### Decision
+
+- **Vector store (DR-1).** `assistant_embeddings` stores float32[768] BLOBs
+  (3 KB/chunk) in the same SQLite/D1 database. Ranking is in-process
+  brute-force cosine capped at 4096 scanned chunks/project. No Vectorize and no
+  sqlite-vec.
+- **Embedding transport (DR-2).** One Workers AI REST path for both runtimes:
+  the OpenAI-compatible `POST /accounts/<id>/ai/v1/embeddings` with
+  `LXK_WORKERS_AI_ACCOUNT_ID` + `LXK_WORKERS_AI_API_TOKEN`; no `ai` binding.
+- **Write path (DR-3).** Chunk rows are written in the source-save transaction
+  (`DELETE` + `INSERT`, `embedding = NULL`); the embedding is filled after
+  commit by a best-effort inline `await`. A failed call never fails the source
+  write.
+- **Read surfaces (DR-4).** Four surfaces over one retrieval core:
+  `semantic_search` chat tool, auto-injected top-1 hint,
+  `GET /api/projects/:slug/semantic-search`, and the READ_ONLY
+  `lexa_semantic_search` MCP tool. Tool and MCP registration are conditional on
+  the same configured-check; unconfigured means absent, not a callable error.
+
+### Options considered
+
+**Cloudflare Vectorize:** rejected — a second stateful store to keep consistent
+with SQLite writes, plus per-index limits, at corpus sizes Lexa has.
+**sqlite-vec:** rejected — D1 does not load extensions and it would fork the two
+drivers. **`ai` binding:** rejected — local Worker dev runs
+`remoteBindings:false`, so it is untestable locally and would create a second
+code path. **Vector-only retrieval:** rejected — the owner asked for both a tool
+and a silent hint; a below-threshold or failed hint leaves the prompt
+byte-identical.
+
+### Consequences
+
+- Zero new infrastructure; the index is transactional with source rows and
+  backed up with the database.
+- Ranking is O(n) up to the documented 4096-chunk cap; the cap is a contract,
+  not a tuning knob. Revisit Vectorize only if a project measurably exceeds it.
+- Chunk text crosses to Cloudflare's API for vectorization; it stays in the
+  owner's account.
+- `embedding_model` is pinned at chunk-row creation and retrieval filters on the
+  current model, so a model swap hides old rows until re-embedded rather than
+  mixing vector spaces.
+- With the env absent, the assistant is byte-identical to the pre-RAG build.
+
 ## File Structure
 
 ```
