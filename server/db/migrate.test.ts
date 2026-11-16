@@ -1177,6 +1177,50 @@ describe("runMigrations", () => {
     ).not.toBeNull();
     after.close();
   });
+
+  // ── 0033 assistant embeddings ───────────────────────────────────────────
+  it("0033 adds assistant_embeddings, its partial index and the three delete triggers (upgraded + fresh DB)", () => {
+    const dir = stageThrough("0032");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0033_assistant_embeddings.sql");
+    const before = new Database(dbPath);
+    expect(tableExists(before, "assistant_embeddings")).toBe(false);
+    before.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+    expect(appliedMigrations(dbPath)).toContain("0033_assistant_embeddings.sql");
+
+    const freshPath = join(tmpDir(), "fresh.db");
+    runMigrations(freshPath, MIGRATIONS);
+
+    for (const path of [dbPath, freshPath]) {
+      const db = new Database(path);
+      try {
+        expect(tableExists(db, "assistant_embeddings")).toBe(true);
+        const objects = db.prepare(
+          `SELECT type, name FROM sqlite_master WHERE name IN (
+             'assistant_embeddings',
+             'idx_assistant_embeddings_project',
+             'assistant_embeddings_wiki_delete',
+             'assistant_embeddings_task_delete',
+             'assistant_embeddings_memory_delete'
+           )`
+        ).all() as { type: string; name: string }[];
+        expect(objects).toEqual(
+          expect.arrayContaining([
+            { type: "table", name: "assistant_embeddings" },
+            { type: "index", name: "idx_assistant_embeddings_project" },
+            { type: "trigger", name: "assistant_embeddings_wiki_delete" },
+            { type: "trigger", name: "assistant_embeddings_task_delete" },
+            { type: "trigger", name: "assistant_embeddings_memory_delete" },
+          ])
+        );
+      } finally {
+        db.close();
+      }
+    }
+  });
 });
 
 // Carried from the absorbed server/repos/assistant-health.repo.test.ts: the

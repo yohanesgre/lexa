@@ -9,7 +9,37 @@ import { createD1Driver } from "./d1";
 import { createBunSqliteDriver } from "./bun-sqlite";
 import { type DbDriver } from "../driver";
 
-const SCHEMA = "CREATE TABLE t (id TEXT PRIMARY KEY, v INTEGER NOT NULL DEFAULT 0)";
+// Minimal live-source tables plus 0033's `assistant_embeddings` shape and its
+// three AFTER DELETE triggers, so delete-cleanup parity runs against the real
+// SQL semantics (the migration file's full DDL is covered by migrate.test.ts).
+const SCHEMA = `
+  CREATE TABLE t (id TEXT PRIMARY KEY, v INTEGER NOT NULL DEFAULT 0);
+  CREATE TABLE wiki_pages (id TEXT PRIMARY KEY);
+  CREATE TABLE tasks (id TEXT PRIMARY KEY);
+  CREATE TABLE project_memory (id TEXT PRIMARY KEY);
+  CREATE TABLE assistant_embeddings (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('wiki','task','memory')),
+    ref_id          TEXT NOT NULL,
+    chunk_index     INTEGER NOT NULL,
+    content         TEXT NOT NULL,
+    embedding       BLOB,
+    embedding_model TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (kind, ref_id, chunk_index)
+  );
+  CREATE TRIGGER assistant_embeddings_wiki_delete AFTER DELETE ON wiki_pages BEGIN
+    DELETE FROM assistant_embeddings WHERE kind = 'wiki' AND ref_id = OLD.id;
+  END;
+  CREATE TRIGGER assistant_embeddings_task_delete AFTER DELETE ON tasks BEGIN
+    DELETE FROM assistant_embeddings WHERE kind = 'task' AND ref_id = OLD.id;
+  END;
+  CREATE TRIGGER assistant_embeddings_memory_delete AFTER DELETE ON project_memory BEGIN
+    DELETE FROM assistant_embeddings WHERE kind = 'memory' AND ref_id = OLD.id;
+  END;
+`;
 
 function makeDb(): Database {
   const db = new Database(":memory:");
@@ -125,6 +155,26 @@ function conformance(label: string, make: () => { driver: DbDriver; close: () =>
         expect(upd!.changes).toBe(1);
         expect(upd!.results).toEqual([]);
         expect(del!.changes).toBe(0);
+      } finally {
+        close();
+      }
+    });
+
+    it("assistant_embeddings delete triggers drop the source's chunks, leaving other kinds", async () => {
+      const { driver, close } = make();
+      try {
+        await driver.prepare("INSERT INTO wiki_pages (id) VALUES (?)").run("w1");
+        await driver.prepare("INSERT INTO project_memory (id) VALUES (?)").run("m1");
+        const insertChunk = `INSERT INTO assistant_embeddings (id, project_id, kind, ref_id, chunk_index, content, embedding_model)
+                             VALUES (?, 'p1', ?, ?, ?, ?, 'model')`;
+        await driver.batch([
+          { sql: insertChunk, params: ["e1", "wiki", "w1", 0, "wiki chunk 0"] },
+          { sql: insertChunk, params: ["e2", "wiki", "w1", 1, "wiki chunk 1"] },
+          { sql: insertChunk, params: ["e3", "memory", "m1", 0, "memory chunk"] },
+        ]);
+        expect((await driver.prepare("DELETE FROM wiki_pages WHERE id = ?").run("w1")).changes).toBe(1);
+        const rows = await driver.prepare("SELECT id, kind FROM assistant_embeddings ORDER BY id").all<{ id: string; kind: string }>();
+        expect(rows).toEqual([{ id: "e3", kind: "memory" }]);
       } finally {
         close();
       }
