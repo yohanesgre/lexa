@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { getEnv, type RuntimeEnv } from "./env";
+import { EMBEDDINGS_MODEL_DEFAULT } from "./assistant/embeddings-client";
 
 export type { RuntimeEnv };
 
@@ -12,6 +13,12 @@ export const currentEnv: Effect.Effect<RuntimeEnv> = Effect.map(
   Effect.serviceOption(RuntimeEnvTag),
   (opt) => (opt._tag === "Some" ? opt.value : getEnv())
 );
+
+// The model default lives in the leaf embeddings client; this resolver keeps
+// env-derived defaults in one place for the services that read the model id.
+export function embeddingsModelFrom(env: RuntimeEnv): string {
+  return env.LXK_EMBEDDINGS_MODEL?.trim() || EMBEDDINGS_MODEL_DEFAULT;
+}
 
 export function adminEmailsFrom(env: RuntimeEnv): string[] {
   return (env.LXK_ADMIN_EMAILS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
