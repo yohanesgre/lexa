@@ -11,6 +11,7 @@
 
 import { Database } from "bun:sqlite";
 import { getEnv, resolveDatabasePath } from "../server/env";
+import { applyEnvFile } from "../server/env-file";
 import { embeddingsModelFrom } from "../server/runtime-env";
 import { embedTexts, embeddingsConfigured } from "../server/assistant/embeddings-client";
 import { chunkDocument, encodeEmbedding } from "../shared/assistant-chunks";
@@ -20,6 +21,10 @@ import type { EmbeddingKind } from "../server/repos/assistant-embeddings.repo";
 const FILL_BATCH = 25;
 const MEMORY_TITLE = "Project memory";
 
+// One-command path: `bun scripts/backfill-embeddings.ts` must work with
+// credentials in .env.toml/.env. Real environment variables still win; a
+// missing file is fine (the refusal below then explains what is absent).
+applyEnvFile();
 const env = getEnv();
 if (!embeddingsConfigured(env)) {
   console.error(
