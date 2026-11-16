@@ -36,6 +36,10 @@ if (!embeddingsConfigured(env)) {
 const model = embeddingsModelFrom(env);
 const dbPath = resolveDatabasePath(env);
 const db = new Database(dbPath);
+// Mirror the app connection (server/db/database.ts): a concurrent WAL writer
+// must not abort the backfill with SQLITE_BUSY, and FK enforcement stays on.
+db.exec("PRAGMA busy_timeout = 5000");
+db.exec("PRAGMA foreign_keys = ON");
 
 interface Source {
   kind: EmbeddingKind;

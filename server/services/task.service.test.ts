@@ -228,8 +228,57 @@ describe("TaskService embeddings", () => {
       expect(row.embedding?.byteLength).toBe(3072);
     }
   });
-});
 
+  it("configured: update re-chunks the merged title/description without duplicates", async () => {
+    seed(db);
+    const svc = makeService(db);
+    stubEmbeddings();
+    const { task } = await runWith(
+      svc.create(maria, {
+        projectId: "p1",
+        columnId: "c-todo",
+        swimlaneId: "s1",
+        title: "Old title",
+        description: "old body",
+        priority: "prio-1",
+        type: "type-1",
+      }),
+      EMBEDDINGS_ENV
+    );
+    const selectRows = db.prepare(
+      `SELECT chunk_index, content, embedding, embedding_model FROM assistant_embeddings
+       WHERE kind = 'task' AND ref_id = ? ORDER BY chunk_index`
+    );
+    const before = selectRows.all(task.id) as { chunk_index: number }[];
+    await runWith(svc.update(maria, task.id, { title: "New title", description: "new body" }), EMBEDDINGS_ENV);
+    const expected = chunkDocument("New title", "new body");
+    const rows = selectRows.all(task.id) as {
+      chunk_index: number;
+      content: string;
+      embedding: Uint8Array | null;
+      embedding_model: string;
+    }[];
+    expect(rows.map((row) => row.content)).toEqual(expected.map((chunk) => chunk.text));
+    expect(rows.map((row) => row.chunk_index)).toEqual(expected.map((chunk) => chunk.index));
+    expect(rows.length).toBe(before.length);
+    const duplicates = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM (
+             SELECT chunk_index FROM assistant_embeddings
+             WHERE kind = 'task' AND ref_id = ? GROUP BY chunk_index HAVING COUNT(*) > 1
+           )`
+        )
+        .get(task.id) as { n: number }
+    ).n;
+    expect(duplicates).toBe(0);
+    for (const row of rows) {
+      expect(row.embedding_model).toBe("@cf/baai/bge-base-en-v1.5");
+      expect(row.embedding).not.toBeNull();
+      expect(row.embedding?.byteLength).toBe(3072);
+    }
+  });
+});
 const REAL_DESC = "hi";
 const EMPTY_DOC = "";
 const WS_DOC = "  ";
