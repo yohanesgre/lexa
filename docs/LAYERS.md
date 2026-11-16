@@ -1082,6 +1082,46 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
 // price-sync: server/assistant/price-sync.ts fetch OpenRouter → assistant_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/assistant/prices/sync).
 ```
 
+### Embeddings client — `server/assistant/embeddings-client.ts` (leaf module)
+
+```typescript
+// Plain leaf module: env + injected FetchLike only — no DB, no Effect service,
+// no service dependency. ONE code path for Bun dev and the deployed Worker:
+// POST https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1/embeddings
+//   { model: LXK_EMBEDDINGS_MODEL, input: string[] }
+//   Authorization: Bearer LXK_WORKERS_AI_API_TOKEN
+// No `ai` binding (local Worker dev runs remoteBindings:false; the REST shape
+// matches the existing `workers_ai` provider precedence).
+export function embeddingsConfigured(env: RuntimeEnv): boolean
+  // env snapshot from server/env.ts; true only when LXK_WORKERS_AI_ACCOUNT_ID
+  // and LXK_WORKERS_AI_API_TOKEN are set
+
+export async function embedTexts(env: RuntimeEnv, texts: string[], opts?: { fetchImpl?: FetchLike }): Promise<number[][] | null>
+  // unconfigured → null. Batches of ≤100 texts per call; 10 s timeout per call;
+  // one retry on 5xx/network; response data[i].embedding; every vector length
+  // validated = 768 (mismatch → null + log, never a corrupt row).
+  // NEVER throws across a service boundary: total failure returns null, and the
+  // caller treats it as "no vectors this time".
+```
+
+Callers pass the `RuntimeEnv` snapshot built by `server/env.ts` (`getEnv` on Bun,
+`getEnvFromWorkers` per request on Workers); the module reads no `process.env`
+itself.
+
+Degradation matrix (all four states are contract):
+
+| State | Behavior |
+|---|---|
+| No `LXK_WORKERS_AI_*` env | No `semantic_search` chat tool, no `lexa_semantic_search` MCP tool, no prompt hint, no chunk writes beyond schema presence; the assistant is byte-identical to today. |
+| Write-path embed failure (5xx/timeout) | The source save succeeds, its chunk rows stay `embedding = NULL`, FTS still serves, and the next save retries. |
+| Query-time embed failure | Chat tool returns a model-readable error result (turn continues); the auto-inject hint is silently omitted; REST is 502 `EMBEDDINGS_UPSTREAM`. |
+| Model mismatch (`embedding_model` ≠ current) | Rows are skipped by retrieval (treated as absent) until re-embedded — stale-model rows are invisible, never corrupt. |
+
+Invariant #1 compliance: the client is a leaf (env + fetch only) consumed by the
+assistant services; wiki, task, and memory services never import each other or
+the gateway. Chunk-row writes ride each service's existing save batch and emit
+no `task_activity` rows (they are not task mutations).
+
 ### Lexa/AssistantMcpService — remote MCP client registry
 
 ```typescript
@@ -1937,6 +1977,8 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ProviderNotConfigured` | 409 | Assistant generate/test/chat without saved provider settings for the project |
 | `ProviderAuthFailed` | 502 | upstream 401/403 (provider or Exa) |
 | `ProviderUnreachable` | 502 | provider network/timeout/DNS failure |
+| `EmbeddingsUnconfigured` | 503 | REST code `EMBEDDINGS_UNCONFIGURED`; semantic search invoked while `LXK_WORKERS_AI_ACCOUNT_ID` or `LXK_WORKERS_AI_API_TOKEN` is unset; the chat and MCP tools are absent in that state |
+| `EmbeddingsUpstream` | 502 | REST code `EMBEDDINGS_UPSTREAM`; query-time embedding call failed after one retry — chat tool returns an error result, hint is omitted; write-path embedding failures are silent NULLs, never user-facing |
 | `AssistantGenerationFailed` | 502 | RUN_ERROR catch-all, malformed stream, or recovery exhausted |
 | `AssistantToolBudgetExceeded` | 502 | tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
 | `AssistantUnavailable` | 502 | Retired DO/internal-route failure code; no live path emits it |

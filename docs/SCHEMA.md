@@ -1136,6 +1136,35 @@ CREATE TABLE document_sources (
 );
 CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
 
+CREATE TABLE assistant_embeddings (
+  id               TEXT PRIMARY KEY,
+  project_id       TEXT NOT NULL,
+  kind             TEXT NOT NULL CHECK (kind IN ('wiki','task','memory')),
+  ref_id           TEXT NOT NULL,            -- wiki_pages.id | tasks.id | project_memory.id
+  chunk_index      INTEGER NOT NULL,
+  content          TEXT NOT NULL,            -- text fed to the embedder (title-prefixed)
+  embedding        BLOB,                     -- float32[768] little-endian, NULL until embedded
+  embedding_model  TEXT NOT NULL,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (kind, ref_id, chunk_index)
+);
+CREATE INDEX idx_assistant_embeddings_project
+  ON assistant_embeddings (project_id, kind) WHERE embedding IS NOT NULL;
+
+-- Orphan cleanup, mirroring the wiki_fts trigger pattern:
+CREATE TRIGGER assistant_embeddings_wiki_delete AFTER DELETE ON wiki_pages BEGIN
+  DELETE FROM assistant_embeddings WHERE kind = 'wiki' AND ref_id = OLD.id;
+END;
+
+CREATE TRIGGER assistant_embeddings_task_delete AFTER DELETE ON tasks BEGIN
+  DELETE FROM assistant_embeddings WHERE kind = 'task' AND ref_id = OLD.id;
+END;
+
+CREATE TRIGGER assistant_embeddings_memory_delete AFTER DELETE ON project_memory BEGIN
+  DELETE FROM assistant_embeddings WHERE kind = 'memory' AND ref_id = OLD.id;
+END;
+
 -- ============================================================
 -- Task links: subtask_of / blocked_by / related_to
 -- ============================================================
@@ -1489,6 +1518,32 @@ Two-level model: `attachments` rows are scoped to a project (UNIQUE(project_id, 
 
 ### FTS5 for `search_wiki`
 The `wiki_fts` external-content table + triggers keep the index in sync automatically. The app maintains `content_text` as a plain-text projection of Markdown on every wiki write; searching Markdown source would match syntax as well as words.
+
+### Assistant embeddings (`assistant_embeddings`)
+Semantic-retrieval corpus for the Assistant, created by
+`migrations/0033_assistant_embeddings.sql`. One row per chunk of a live wiki
+page, task description, or project-memory entry; wiki revisions are excluded.
+
+- **Storage math:** 768 dims × 4 bytes = 3 KB/chunk. 10k chunks ≈ 30 MB —
+  fine in both SQLite and D1.
+- **No FK:** one table cannot reference three different source tables. The
+  `AFTER DELETE` triggers (`assistant_embeddings_wiki_delete`,
+  `assistant_embeddings_task_delete`, `assistant_embeddings_memory_delete`)
+  mirror the `wiki_fts_ai/ad/au` style and delete a source's chunks when the
+  source row is deleted.
+- **Orphans are invisible:** retrieval JOINs the live source tables for
+  titles/slugs/keys, so any chunk left behind by a missed cleanup path drops
+  out of results instead of surfacing stale content.
+- **Write contract:** `shared/assistant-chunks.ts` produces title-prefixed
+  chunks (`content`); chunk rows are replaced inside the source save
+  transaction with `embedding = NULL`. `server/assistant/embeddings-client.ts`
+  fills the BLOB after commit, best-effort: a failed call leaves NULL and the
+  next save retries. The partial index `idx_assistant_embeddings_project`
+  serves the project-scoped scan and excludes NULL embeddings.
+- **Model pinning:** `embedding_model` is written when the chunk row is
+  created, not when the vector is filled. Retrieval filters on the current
+  model, so a model swap hides old rows until they are re-embedded (never
+  corrupt results).
 
 ### Markdown links are document references, not rows
 A task/wiki reference is a Markdown hyperlink in the existing description/content string; no table, column, index, or notification rows. Autocomplete is a read-only cross-repo search (`MentionService`, cap 8). GitHub receives stable deep links for task/wiki references.

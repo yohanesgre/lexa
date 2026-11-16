@@ -5,6 +5,25 @@ All notable changes to Lexa are documented here. Format based on
 [Calendar Versioning](https://calver.org/) (`YYYY.MINOR.MICRO` — see
 `docs/RELEASING.md`).
 
+## [Unreleased]
+
+### Added
+
+- **Semantic retrieval for the Assistant.** The assistant can search wiki
+  pages, task descriptions, and project memory by meaning rather than exact
+  terms through a new `semantic_search` chat tool, an auto-injected best-match
+  hint, `GET /api/projects/:slug/semantic-search`, and the read-only
+  `lexa_semantic_search` MCP tool. Embeddings live in the same SQLite/D1
+  database as the source rows (`assistant_embeddings`, migration `0033`); a
+  source save writes its chunk rows in the same transaction and the vector is
+  filled afterward, so an embedding outage never fails a write. With embeddings
+  unconfigured, the feature is inert and the assistant behaves exactly as
+  before.
+- **Workers AI embedding configuration.** `LXK_WORKERS_AI_ACCOUNT_ID` (var),
+  `LXK_WORKERS_AI_API_TOKEN` (Workers secret; Workers AI-only permission), and
+  `LXK_EMBEDDINGS_MODEL` (var; default `@cf/baai/bge-base-en-v1.5`). One REST
+  code path serves Bun dev and the deployed Worker; there is no `ai` binding.
+
 ## [2026.15.1] - 2026-11-07
 
 ### Fixed

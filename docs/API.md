@@ -78,6 +78,8 @@ All non-2xx responses share one shape:
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 | 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |
+| 502 | `EMBEDDINGS_UPSTREAM` | Query-time embedding call failed after one retry (semantic-search REST response / chat tool error result; write-path embedding failures stay silent NULLs) |
+| 503 | `EMBEDDINGS_UNCONFIGURED` | Semantic search invoked while `LXK_WORKERS_AI_ACCOUNT_ID` or `LXK_WORKERS_AI_API_TOKEN` is unset (the chat tool and MCP tool are absent in that state) |
 | 409 | `PROVIDER_NOT_CONFIGURED` | Assistant generate/test/chat without saved provider settings for the project |
 | 502 | `PROVIDER_AUTH_FAILED` | Upstream 401/403 from the provider or Exa |
 | 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
@@ -2591,6 +2593,12 @@ DELETE /api/assistant/memory/:projectId/:memoryId
         assignees?: string[], githubIssue?: { repo, number } | null }
     search_tasks(query, limit?)          ≤10 title-substring matches
     search_wiki(query, limit?)           FTS, ≤10 {title, slug, snippet}
+    semantic_search(query, limit?, kinds?)
+                                         vector search over wiki/task/memory;
+                                         ≤5 {results:[{kind,title,snippet,
+                                         locator}]}; wiki locator = slug,
+                                         task = key (PREFIX-n), memory =
+                                         inline content; absent unconfigured
     read_wiki_page(slug)                 { title, slug, markdown } (~8k cap)
     get_all_tasks()                      { tasks: [<get_task summary fields>
                                          + markdown], truncated? } — archived
@@ -2606,6 +2614,25 @@ DELETE /api/assistant/memory/:projectId/:memoryId
                                          milestones: [{id, name, dueAt,
                                          archived}] }
 ```
+
+### Semantic search (RAG)
+
+```
+GET    /api/projects/:slug/semantic-search?q*&kinds=wiki,task,memory&limit=5
+→ 200 { results: [{ kind, title, snippet, locator }] }
+  | 503 EMBEDDINGS_UNCONFIGURED | 502 EMBEDDINGS_UPSTREAM
+  `q` is required and non-empty. `kinds` is a comma-separated subset of
+  `wiki,task,memory` (default all three); `limit` is 1–10 (default 5).
+  Project-read auth, the same gate as `GET /api/projects/:slug/wiki/search`.
+  `locator` is the wiki page slug, the task key (`PREFIX-n`), or the memory
+  entry's inline content. 503 when the Workers AI env is unset; 502 when the
+  query embedding call fails after one retry. Write-path embedding failures
+  never surface here.
+```
+
+The endpoint shares the chat tool's retrieval core: embed `q` through the
+Workers AI REST client, scan the project's `assistant_embeddings` rows, rank by
+cosine similarity, and join live source rows for titles/slugs/keys.
 
 ## Inbound MCP server (`/mcp`)
 
@@ -2720,6 +2747,7 @@ wherever the REST operation does; wiki tools take `pageSlug`.
 | `lexa_list_wiki_pages` | `GET /api/projects/:slug/wiki` | Flat page metadata list. |
 | `lexa_get_wiki_page` | `GET /api/projects/:slug/wiki/:pageSlug` | Full page Markdown. |
 | `lexa_search_wiki` | `GET /api/projects/:slug/wiki/search?q` | Project wiki FTS. `q` is required and non-empty. |
+| `lexa_semantic_search(projectSlug, q, kinds?, limit?)` | `GET /api/projects/:slug/semantic-search?q&kinds&limit` | Semantic retrieval over wiki, task descriptions, and project memory. READ_ONLY; registered in `registerLexaTools` only when embeddings are configured (the same check as the chat tool) — absent otherwise. |
 | `lexa_create_wiki_page` | `POST /api/projects/:slug/wiki` | Create with existing nesting rules. |
 | `lexa_update_wiki_page` | `PATCH /api/projects/:slug/wiki/:pageSlug` | Update with existing revision/validation rules; optional `saveType`. |
 

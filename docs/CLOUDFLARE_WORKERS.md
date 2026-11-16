@@ -281,6 +281,22 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
     for Jev), never an anonymous connect. `key_id` records only the keyring
     **slot** (`active`/`prev`) — never a fingerprint — so rotation reads through
     `LXK_SECRETS_MASTER_KEY_PREV` with no rewrap.
+- **Embeddings (Workers AI REST).** `semantic_search` and
+  `lexa_semantic_search` use the account-scoped REST embeddings endpoint
+  (`/accounts/<id>/ai/v1/embeddings`) — one REST code path serves Bun dev and
+  the deployed Worker; there is no `ai` binding. Chunk text crosses to
+  Cloudflare's API for vectorization and stays in the owner's account.
+
+| Variable | Kind | Purpose |
+|---|---|---|
+| `LXK_WORKERS_AI_ACCOUNT_ID` | var | Cloudflare account id used in the REST path. |
+| `LXK_WORKERS_AI_API_TOKEN` | `wrangler secret` | Account-scoped API token with the Workers AI permission only (no deploy, DNS, or billing rights). Separate from the per-provider `workers_ai` model credential stored in assistant settings. `wrangler secret put LXK_WORKERS_AI_API_TOKEN`. |
+| `LXK_EMBEDDINGS_MODEL` | var | Embedding model id; default `@cf/baai/bge-base-en-v1.5`. Retrieval filters on this value, so a model swap hides old rows until they are re-embedded. |
+
+With the account id or token absent, the feature is inert: no
+`semantic_search` tool, no prompt hint, no chunk writes, and the assistant
+behaves exactly as before.
+
 - Migrations: `wrangler d1 migrations create/apply`; seed via
   `wrangler d1 execute --file`. Replaces `scripts/dev.sh` boot + `seed-dev.sql`.
   Migration `0012_remove_mcp_secret_refs.sql` (a single `UPDATE` clearing the
