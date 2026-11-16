@@ -56,6 +56,11 @@ scripts/ci-local.sh` mirrors release CI. Installer surface: `bash scripts/test-i
 5. **Budget:** 100 files / 900 cases / 27k LOC. Exceeding a ceiling is a warning owned by the report, not
    a license to duplicate — prefer extending an existing case's assertions over adding a near-identical
    case, and never re-pin existing wording or implementation behavior (delete it instead).
+   Recorded growth (2026-11-16, rag-assistant): 113 files / 994 cases / 31,675 LOC over these
+   ceilings — criterion: every new case maps to a documented contract, degradation row,
+   atomicity property, or destructive migration path (promoted in docs/SCHEMA.md, docs/API.md,
+   docs/LAYERS.md), per rule 1. The ceilings stay as the signal; further growth records a new
+   criterion.
 
 Also banned by judgment (no mechanical check): copy/label/px/class pins, internal-wiring assertions,
 source-text scans, implementation-detail pins, and tests whose subject has no production caller.

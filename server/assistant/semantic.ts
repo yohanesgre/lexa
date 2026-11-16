@@ -24,6 +24,7 @@ export const SEMANTIC_RESULT_CAP = 5;
 export const SEMANTIC_SNIPPET_CAP = 500;
 
 const HINT_LABEL = "[Possibly relevant — auto-retrieved from project content; not authoritative]";
+const HINT_END = "[end of retrieved excerpt]";
 const ALL_KINDS: readonly EmbeddingKind[] = ["wiki", "task", "memory"];
 
 export interface SemanticHit {
@@ -109,7 +110,7 @@ export async function semanticHint(
     const hits = await semanticSearch(db, env, projectId, query, 1, undefined, opts);
     const top = hits?.[0];
     if (top === undefined || top.score < SEMANTIC_HINT_MIN_COSINE) return null;
-    return `${HINT_LABEL}\n${top.title} (${top.kind}): ${top.snippet}`;
+    return `${HINT_LABEL}\n${top.title} (${top.kind}): ${top.snippet}\n${HINT_END}`;
   } catch {
     return null;
   }

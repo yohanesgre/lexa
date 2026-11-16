@@ -21,7 +21,7 @@
    "mock_echo": 7
   },
   "app/components/useTaskDetailActions.test.tsx": {
-   "mock_echo": 3
+   "mock_echo": 0
   },
   "app/lib/api.test.ts": {
    "weak_assert": 1
@@ -47,7 +47,7 @@
    "mock_echo": 2
   },
   "app/routes/share.$token.test.tsx": {
-   "mock_echo": 1
+   "mock_echo": 0
   },
   "cli/src/config.test.ts": {
    "mock_echo": 4,

@@ -3,6 +3,10 @@ import { estimateTokenCount } from "tokenx";
 export const CHUNK_TARGET_TOKENS = 450;
 export const CHUNK_OVERLAP_TOKENS = 50;
 export const CHUNK_HARD_MAX_TOKENS = 512;
+/** Chunker title prefix for project-memory rows. The write path, the
+ * backfill, and the retrieval display must share it or memory chunks split
+ * by title prefix. */
+export const MEMORY_TITLE = "Project memory";
 
 export interface DocumentChunk {
   index: number;
