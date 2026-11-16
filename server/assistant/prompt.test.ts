@@ -39,6 +39,40 @@ describe("buildSystemPrompts advisory block", () => {
   });
 });
 
+describe("buildSystemPrompts semantic hint", () => {
+  it("emits nothing when absent, null, or blank — the array stays byte-identical", () => {
+    const baseline = buildSystemPrompts({ ...base, memoryBlock: "MEM", agentMarkdown: "AGENT", docContext: "DOC", advisory });
+    const absent = buildSystemPrompts({ ...base, memoryBlock: "MEM", agentMarkdown: "AGENT", docContext: "DOC", advisory, semanticHint: null });
+    const blank = buildSystemPrompts({ ...base, memoryBlock: "MEM", agentMarkdown: "AGENT", docContext: "DOC", advisory, semanticHint: "   " });
+    expect(absent.map((p) => p.content)).toEqual(baseline.map((p) => p.content));
+    expect(blank.map((p) => p.content)).toEqual(baseline.map((p) => p.content));
+    expect(absent[0]!.cache_control).toEqual({ type: "ephemeral" });
+    expect(absent[1]!.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("rides after advisory and before the thread summary in the uncached slot", () => {
+    const hint = "[Possibly relevant — auto-retrieved from project content; not authoritative]\nRelease checklist (wiki): Ship on Friday.";
+    const prompts = buildSystemPrompts({
+      ...base,
+      memoryBlock: "MEM",
+      agentMarkdown: "AGENT",
+      docContext: "DOC",
+      advisory,
+      semanticHint: hint,
+      threadSummary: { summary: "SUMMARY", summarizedCount: 3 },
+    });
+    expect(prompts).toHaveLength(3);
+    const last = prompts[2]!;
+    expect(last.cache_control).toBeUndefined();
+    expect(last.content).toContain(hint);
+    expect(last.content.indexOf(advisory)).toBeLessThan(last.content.indexOf(hint));
+    expect(last.content.indexOf(hint)).toBeLessThan(last.content.indexOf("[Conversation summary"));
+    // Cached slots untouched by the per-turn hint.
+    expect(prompts[0]!.content).not.toContain(hint);
+    expect(prompts[1]!.content).not.toContain(hint);
+  });
+});
+
 describe("buildSystemPrompts thread summary", () => {
   it("leaves the cached slots byte-identical with and without a summary", () => {
     const without = buildSystemPrompts({ ...base, memoryBlock: "MEM", agentMarkdown: "AGENT", docContext: "DOC" });

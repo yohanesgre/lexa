@@ -1,4 +1,5 @@
-// The 22-tool inbound MCP catalog. Every tool maps to one approved REST
+// The inbound MCP catalog: 22 tools, plus `lexa_semantic_search` when the
+// Workers AI env is configured. Every tool maps to one approved REST
 // operation and returns that operation's persisted response. Nothing here
 // touches SQL or a service directly: `dispatch` replays the authenticated route
 // in-process (see rest.ts), so route-level orchestration — including GitHub
@@ -147,7 +148,11 @@ async function invoke(dispatch: McpRestDispatch, call: McpRestCall, readOnly: bo
   };
 }
 
-export function registerLexaTools(server: McpServer, dispatch: McpRestDispatch): void {
+export function registerLexaTools(
+  server: McpServer,
+  dispatch: McpRestDispatch,
+  opts: { embeddingsConfigured?: boolean } = {}
+): void {
   // ── Discovery ──────────────────────────────────────────────────────────
   server.registerTool(
     "lexa_list_projects",
@@ -483,6 +488,49 @@ export function registerLexaTools(server: McpServer, dispatch: McpRestDispatch):
     ({ projectSlug: slug, q }) =>
       invoke(dispatch, { method: "GET", path: withQuery(projectPath(slug, "/wiki/search"), { q }) }, true)
   );
+
+  // Conditional mirror of the chat toolset: registered only when the Workers
+  // AI env is configured, so an MCP client never discovers a tool that can
+  // only fail with EMBEDDINGS_UNCONFIGURED.
+  if (opts.embeddingsConfigured === true) {
+    server.registerTool(
+      "lexa_semantic_search",
+      {
+        title: "Semantic search",
+        description:
+          "Search the project semantically: wiki pages, task descriptions, and project memory ranked by embedding similarity. Returns up to `limit` matches with kind, title, snippet, and locator (wiki slug, task key, or the memory entry's content).",
+        inputSchema: {
+          projectSlug,
+          q: z.string().min(1).describe("Natural-language query."),
+          kinds: z
+            .array(z.enum(["wiki", "task", "memory"]))
+            .optional()
+            .describe("Restrict to these source kinds (REST default: all three)."),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(10)
+            .optional()
+            .describe("Result count (1-10, REST default 5)."),
+        },
+        annotations: READ_ONLY,
+      },
+      ({ projectSlug: slug, q, kinds, limit: resultLimit }) =>
+        invoke(
+          dispatch,
+          {
+            method: "GET",
+            path: withQuery(projectPath(slug, "/semantic-search"), {
+              q,
+              kinds: kinds && kinds.length > 0 ? kinds.join(",") : undefined,
+              limit: resultLimit,
+            }),
+          },
+          true
+        )
+    );
+  }
 
   server.registerTool(
     "lexa_create_wiki_page",

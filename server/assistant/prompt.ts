@@ -104,6 +104,11 @@ export interface SystemPromptInput {
   // call failed open) and nothing is emitted — the cached slots and the other
   // context blocks are then byte-identical to a run without it.
   advisory?: string | null | undefined;
+  // Auto-retrieved retrieval hint (already labeled non-authoritative by its
+  // producer, semantic.ts). Rides after `advisory` and before `threadSummary`
+  // in the last, uncached slot; absent/null/blank emits nothing, so a run
+  // without it is byte-identical to the pre-retrieval prompt.
+  semanticHint?: string | null | undefined;
   // Thread compaction summary produced on the DO (H2). Rides in the last,
   // uncached context slot; absent/null/blank emits nothing.
   threadSummary?: { summary: string; summarizedCount: number } | null | undefined;
@@ -138,6 +143,7 @@ export function buildSystemPrompts(input: SystemPromptInput): CacheablePrompt[] 
     docContextBlock(input.docContext ?? ""),
     input.mentionContext && input.mentionContext.trim() !== "" ? input.mentionContext : null,
     input.advisory && input.advisory.trim() !== "" ? input.advisory : null,
+    input.semanticHint && input.semanticHint.trim() !== "" ? input.semanticHint : null,
     threadSummaryBlock(input.threadSummary),
   ].filter((b): b is string => b !== null);
   if (contextBlocks.length > 0) prompts.push({ content: contextBlocks.join("\n\n") });

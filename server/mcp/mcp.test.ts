@@ -10,7 +10,12 @@ import { resolveApiKeyIdentity } from "../api/auth-key";
 import { syncRateLimitFromDb } from "../api/rate-limit";
 import type { RuntimeEnv } from "../env";
 import { handleMcpRequest, type McpBoundaryDeps } from "./http";
-import { createRestDispatch } from "./rest";
+import { createRestDispatch, type McpRestCall, type McpRestDispatch } from "./rest";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import { MCP_SERVER_INFO, registerLexaTools } from "./catalog";
 
 // Inbound MCP boundary + catalog contract (docs/API.md → Inbound MCP server).
 // The suite drives the real boundary over real REST operations against a real
@@ -440,5 +445,68 @@ describe("inbound MCP tools", () => {
     const third = await mcp(ADMIN_KEY, { jsonrpc: "2.0", id: 3, method: "ping" }, { clientIp });
     expect(third.status).toBe(429);
     expect(((await third.json()) as { error: { code: string } }).error.code).toBe("RATE_LIMITED");
+  });
+});
+
+// The semantic tool is registered from the same conditional as the chat
+// toolset; the in-memory transport lets the catalog be asserted without the
+// HTTP boundary (no env, limiter or database involvement).
+async function connectedCatalog(dispatch: McpRestDispatch, opts: { embeddingsConfigured?: boolean }) {
+  const server = new McpServer(MCP_SERVER_INFO, { jsonSchemaValidator: new AjvJsonSchemaValidator() });
+  registerLexaTools(server, dispatch, opts);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "vitest", version: "1.0.0" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  return { client, server };
+}
+
+async function catalogToolNames(opts: { embeddingsConfigured?: boolean }): Promise<string[]> {
+  const { client, server } = await connectedCatalog(async () => new Response("{}", { status: 200 }), opts);
+  try {
+    const listed = await client.listTools();
+    return listed.tools.map((tool) => tool.name);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
+describe("lexa_semantic_search registration", () => {
+  it("is absent unless embeddings are configured, and joins the catalog when they are", async () => {
+    const unconfigured = await catalogToolNames({ embeddingsConfigured: false });
+    expect(unconfigured).toHaveLength(EXPECTED_TOOLS.length);
+    expect(unconfigured.includes("lexa_semantic_search")).toBe(false);
+
+    const configured = await catalogToolNames({ embeddingsConfigured: true });
+    expect(configured).toHaveLength(EXPECTED_TOOLS.length + 1);
+    expect(configured.includes("lexa_semantic_search")).toBe(true);
+  });
+
+  it("dispatches a READ_ONLY GET /semantic-search with comma-joined kinds and limit", async () => {
+    const calls: McpRestCall[] = [];
+    const dispatch: McpRestDispatch = async (call) => {
+      calls.push(call);
+      return new Response(
+        JSON.stringify({ results: [{ kind: "wiki", title: "Release checklist", snippet: "Ship on Friday", locator: "release-checklist" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    };
+    const { client, server } = await connectedCatalog(dispatch, { embeddingsConfigured: true });
+    try {
+      const result = await client.callTool({
+        name: "lexa_semantic_search",
+        arguments: { projectSlug: "p1", q: "ship the release", kinds: ["wiki", "task"], limit: 3 },
+      });
+      expect(result.isError === true).toBe(false);
+      expect(calls).toEqual([
+        { method: "GET", path: "/api/projects/p1/semantic-search?q=ship+the+release&kinds=wiki%2Ctask&limit=3" },
+      ]);
+      expect(result.structuredContent).toEqual({
+        results: [{ kind: "wiki", title: "Release checklist", snippet: "Ship on Friday", locator: "release-checklist" }],
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 });

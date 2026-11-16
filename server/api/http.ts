@@ -16,7 +16,7 @@ import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
 import { backfillTaskKeysDriver } from "../db/task-keys-backfill";
 import { getSettingAsync, setSettingAsync, deleteSettingAsync, settingUpsertStmt, settingDeleteStmt, invalidateSettingsCache } from "./workers-ports";
-import { ProjectNotFound, WikiPageNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, AssistantTaskActive, AssistantThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed, HasChildren, TasksBulkDisabled } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, AssistantTaskActive, AssistantThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed, HasChildren, TasksBulkDisabled, EmbeddingsUnconfigured, EmbeddingsUpstream } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -48,6 +48,11 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { WikiShareService } from "../services/wiki-share.service";
 import { WikiShareRepo } from "../repos/wiki-share.repo";
 import type { WikiShareLinkRow } from "../repos/wiki-share.repo";
+// Semantic retrieval: a leaf client (env + fetch) and a read-only SQL repo, so
+// the group is safe on both flavors' base route stack (no assistant engine).
+import { semanticSearch } from "../assistant/semantic";
+import { embeddingsConfigured } from "../assistant/embeddings-client";
+import type { EmbeddingKind } from "../repos/assistant-embeddings.repo";
 import { AttachmentService } from "../services/attachment.service";
 import { AttachmentRepo } from "../repos/attachment.repo";
 import { ChatAttachmentRepo } from "../repos/chat-attachment.repo";
@@ -688,6 +693,15 @@ const WikiSearchItemSchema = Schema.extend(WikiPageSchema, Schema.Struct({ snipp
 
 const WikiSearchResponse = Schema.Struct({ data: Schema.Array(WikiSearchItemSchema) });
 
+const SemanticSearchItemSchema = Schema.Struct({
+  kind: Schema.Literal("wiki", "task", "memory"),
+  title: Schema.String,
+  snippet: Schema.String,
+  locator: Schema.String,
+});
+
+const SemanticSearchResponse = Schema.Struct({ results: Schema.Array(SemanticSearchItemSchema) });
+
 const PagePath = Schema.Struct({ slug: Schema.String, pageSlug: Schema.String });
 
 const RevisionPath = Schema.Struct({ slug: Schema.String, pageSlug: Schema.String, revisionId: Schema.String });
@@ -1029,6 +1043,13 @@ const wikiGroup = HttpApiGroup.make("wiki")
   .add(HttpApiEndpoint.del("revokeShareLink", "/projects/:slug/wiki/share/:linkId")
     .setPath(ShareLinkPath).addSuccess(Schema.Void, { status: 204 }));
 
+// Semantic retrieval over the project's embedded content. Query params are
+// read from the raw URL (searchParams) because the whole surface is
+// query-string driven, like /wiki/search above.
+const semanticGroup = HttpApiGroup.make("semantic")
+  .add(HttpApiEndpoint.get("searchSemantic", "/projects/:slug/semantic-search")
+    .setPath(SlugPath).addSuccess(SemanticSearchResponse));
+
 // PUBLIC surface — token IS the auth. Middleware skips AUTH for /api/share/*
 // (stricter rate bucket instead); the handler consumes NO AuthIdentity.
 const publicShareGroup = HttpApiGroup.make("publicShare")
@@ -1311,6 +1332,7 @@ const lexaBase = HttpApi.make("lexa")
   .add(tasksGroup)
   .add(boardGroup)
   .add(wikiGroup)
+  .add(semanticGroup)
   .add(dashboardGroup)
   .add(apiKeysGroup)
   .add(deviceLoginGroup)
@@ -2821,6 +2843,54 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
 );
 
+// Semantic search handler. Validation runs before the env gate so a malformed
+// call is INVALID_ARGS regardless of configuration; the env gate is the
+// documented 503 and a failed query embed is the documented 502. Both codes map
+// centrally in errors.ts — no per-endpoint try/catch responses.
+const SEMANTIC_KINDS: readonly string[] = ["wiki", "task", "memory"];
+const SEMANTIC_DEFAULT_LIMIT = 5;
+const SEMANTIC_MAX_LIMIT = 10;
+
+function parseSemanticKinds(raw: string | null): EmbeddingKind[] | null {
+  if (raw === null || raw.trim() === "") return null;
+  const parts = raw.split(",").map((part) => part.trim()).filter((part) => part !== "");
+  if (parts.length === 0 || parts.some((part) => !SEMANTIC_KINDS.includes(part))) return null;
+  return parts as EmbeddingKind[];
+}
+
+const semanticLive = HttpApiBuilder.group(LexaApi, "semantic", (handlers) =>
+  handlers.handle("searchSemantic", (req) =>
+    respond(Effect.gen(function* () {
+      const project = yield* requireProjectRead(req.path.slug);
+      const params = searchParams(req);
+      const q = (params.get("q") ?? "").trim();
+      if (q === "") return yield* new InvalidArgs({ reason: "q is required and non-empty" });
+      const rawKinds = params.get("kinds");
+      const kinds = parseSemanticKinds(rawKinds);
+      if (kinds === null && rawKinds !== null && rawKinds.trim() !== "") {
+        return yield* new InvalidArgs({ reason: "kinds must be a comma-separated subset of wiki,task,memory" });
+      }
+      const rawLimit = params.get("limit");
+      let limit = SEMANTIC_DEFAULT_LIMIT;
+      if (rawLimit !== null && rawLimit.trim() !== "") {
+        const parsed = Number(rawLimit);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > SEMANTIC_MAX_LIMIT) {
+          return yield* new InvalidArgs({ reason: `limit must be an integer 1-${SEMANTIC_MAX_LIMIT}` });
+        }
+        limit = parsed;
+      }
+      const env = yield* currentEnv;
+      if (!embeddingsConfigured(env)) return yield* new EmbeddingsUnconfigured();
+      const db = yield* Db;
+      const hits = yield* Effect.promise(() => semanticSearch(db, env, project.id, q, limit, kinds ?? undefined)).pipe(
+        Effect.catchAllCause(() => Effect.succeed(null))
+      );
+      if (hits === null) return yield* new EmbeddingsUpstream();
+      return { results: hits.map((hit) => ({ kind: hit.kind, title: hit.title, snippet: hit.snippet, locator: hit.locator })) };
+    }))
+  )
+);
+
 // PUBLIC group handler — token-scoped read only. Deliberately consumes NO
 // AuthIdentity: exempt paths receive a synthetic admin identity from the
 // middleware, and honoring it here would make every token equivalent to
@@ -3386,7 +3456,7 @@ function formatWikiPageRevision<T>(r: T): T {
 // (ADR-0005 D7).
 export function baseRouteGroups() {
   return Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, sourcesLive, agentsLive, skillsLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, sourcesLive, agentsLive, skillsLive, taskLinksLive, tasksLive, boardLive, wikiLive, semanticLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   );
 }

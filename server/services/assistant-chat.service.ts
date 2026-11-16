@@ -6,6 +6,9 @@ import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import type { RuntimeEnv } from "../env";
 import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, CHAT_IDENTITY } from "../assistant/prompt";
+import { semanticHint, semanticSearch } from "../assistant/semantic";
+import { embeddingsConfigured } from "../assistant/embeddings-client";
+import type { EmbeddingKind } from "../repos/assistant-embeddings.repo";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
 import { AssistantPendingWritesRepo, type AssistantPendingWriteRow } from "../repos/assistant-pending-writes.repo";
@@ -222,8 +225,21 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       );
     };
 
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null, boundSkills: BoundSkill[], markdownBinding?: RuntimeEnv["AI"]) => ({
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null, boundSkills: BoundSkill[], env: RuntimeEnv, markdownBinding?: RuntimeEnv["AI"]) => ({
       projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch, markdownBinding,
+      // Semantic retrieval is offered only when the Workers AI env is present,
+      // so discovery matches REST/MCP (absent, not erroring, when unconfigured).
+      ...(embeddingsConfigured(env)
+        ? {
+            semanticSearch: async (query: string, limit: number, kinds?: readonly EmbeddingKind[]) => {
+              try {
+                return await semanticSearch(db, env, projectId, query, limit, kinds);
+              } catch {
+                return null;
+              }
+            },
+          }
+        : {}),
       // get_skill can only discover skills the agent actually has bound, so the
       // loader (and with it the tool) is omitted when there are none.
       ...(boundSkills.length > 0 ? { loadSkillByName: async (name: string): Promise<BoundSkill | null> => matchBoundSkillByName(boundSkills, name) } : {}),
@@ -442,7 +458,13 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           taskWikiContext: mentionContext,
           memoryHits,
         });
-        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdowns, skillCatalog, mentionContext, writeTools: enabledWriteTools, advisory: preflight.segment });
+        // Retrieval hint on NEW turns only (resume stays byte-identical). Any
+        // failure — embed, DB, unexpected throw — is the documented silent
+        // omission; it never fails the turn.
+        const semanticHintText = embeddingsConfigured(env)
+          ? yield* Effect.promise(() => semanticHint(db, env, req.projectId, req.message)).pipe(Effect.catchAllCause(() => Effect.succeed(null)))
+          : null;
+        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdowns, skillCatalog, mentionContext, writeTools: enabledWriteTools, advisory: preflight.segment, semanticHint: semanticHintText });
         const refs: unknown[] = attachments.map((a) => isChatImageMime(a.mimeType)
           ? { type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType }
           : { type: "document-ref", storageKey: a.storageKey, mimeType: a.mimeType, name: a.name });
@@ -462,7 +484,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, resolveCompactionConfig: () => Effect.runPromise(gateway.resolveProviderConfig(req.projectId)), gatewayStream: (input) => gateway.streamChat({ projectId: req.projectId, ...input }), localWriteTracker,
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions,
           userContent, tools: (() => {
-            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills, env.AI), onCitation: (c) => { citations = collectCitation(citations, c); } });
+            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills, env, env.AI), onCitation: (c) => { citations = collectCitation(citations, c); } });
             const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId }, permissionMode, localWriteTracker);
             chatWriteDrain = writeSet.drain;
             const mcpTools = mcp?.tools ?? [];
@@ -580,7 +602,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
             keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, resolveCompactionConfig: () => Effect.runPromise(gateway.resolveProviderConfig(thread.projectId)), gatewayStream: (input) => gateway.streamChat({ projectId: thread.projectId, ...input }), localWriteTracker,
             systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsEffort), config.kind),
             userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, writeMode: thread.permissionMode,
-            tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills, env.AI), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
+            tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills, env, env.AI), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
             toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId, chatId, userId), loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
             persist: (messages, summary, summarizedCount) => {
               const tail = messages.at(-1) as { role?: string; toolLog?: Array<{ name: string; detail?: string }> } | undefined;
