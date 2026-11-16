@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { estimateTokenCount } from "tokenx";
 import {
   CHUNK_HARD_MAX_TOKENS,
+  CHUNK_TARGET_TOKENS,
   chunkDocument,
   cosineSimilarity,
   decodeEmbedding,
@@ -15,6 +16,17 @@ function bodyWords(chunk: DocumentChunk, title: string): string[] {
   const prefix = `${title}\n`;
   const body = chunk.text.startsWith(prefix) ? chunk.text.slice(prefix.length) : chunk.text;
   return body.split(" ").filter((word) => word.length > 0);
+}
+
+// Longest suffix of `previous` that is exactly the opening run of `next`.
+function sharedOpeningRun(previous: readonly string[], next: readonly string[]): string[] {
+  const limit = Math.min(previous.length, next.length);
+  for (let length = limit; length > 0; length -= 1) {
+    let offset = 0;
+    while (offset < length && previous[previous.length - length + offset] === next[offset]) offset += 1;
+    if (offset === length) return next.slice(0, length);
+  }
+  return [];
 }
 
 function candidate(id: string, chunkIndex: number, vector: number[]): EmbeddingCandidate {
@@ -44,14 +56,17 @@ describe("chunkDocument", () => {
       expect(chunk.text.startsWith(`${title}\n`)).toBe(true);
       expect(estimateTokenCount(chunk.text)).toBeLessThanOrEqual(CHUNK_HARD_MAX_TOKENS);
     }
+    for (const chunk of chunks.slice(0, -1)) {
+      expect(estimateTokenCount(chunk.text)).toBeGreaterThanOrEqual(CHUNK_TARGET_TOKENS - 50);
+    }
 
     const covered = new Set(chunks.flatMap((chunk) => bodyWords(chunk, title)));
     expect(body.split(" ").filter((word) => !covered.has(word))).toEqual([]);
 
     for (let index = 1; index < chunks.length; index += 1) {
-      const previous = new Set(bodyWords(chunks[index - 1]!, title));
-      const shared = bodyWords(chunks[index]!, title).filter((word) => previous.has(word));
+      const shared = sharedOpeningRun(bodyWords(chunks[index - 1]!, title), bodyWords(chunks[index]!, title));
       expect(shared.length).toBeGreaterThan(0);
+      expect(estimateTokenCount(shared.join(" "))).toBeGreaterThanOrEqual(25);
     }
 
     expect(chunkDocument(title, body)).toEqual(chunks);

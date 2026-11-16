@@ -47,9 +47,11 @@ export function chunkDocument(title: string, body: string): DocumentChunk[] {
   // for body text, so the document collapses to its title.
   if (titleCost >= CHUNK_HARD_MAX_TOKENS) return [{ index: 0, text: head }];
 
-  // One estimate per word, then prefix sums: tokenx counts single spaces as
-  // zero tokens and splits each word the same way in context, so a range's
-  // difference is its exact body estimate — no per-word prefix re-estimation.
+  // One estimate per word, then prefix sums: tokenx usually counts single
+  // spaces as zero tokens and splits each word the same way in context, so a
+  // range difference approximates the body estimate without re-estimating a
+  // growing prefix. Separator/structure tokens can differ; the exact per-chunk
+  // re-estimate below plus its shrink loop enforces the hard cap.
   const prefix: number[] = [0];
   for (let index = 0; index < words.length; index += 1) {
     prefix.push(prefix[index]! + Math.max(1, estimateTokenCount(words[index]!)));
