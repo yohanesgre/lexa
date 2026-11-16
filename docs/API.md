@@ -78,7 +78,7 @@ All non-2xx responses share one shape:
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 | 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |
-| 502 | `EMBEDDINGS_UPSTREAM` | Query-time embedding call failed after one retry (semantic-search REST response / chat tool error result; write-path embedding failures stay silent NULLs) |
+| 502 | `EMBEDDINGS_UPSTREAM` | Query-time embedding call failed after one retry (semantic-search REST response / chat tool error result; write-path embedding failures stay silent NULLs). In v1 a local retrieval failure — a DB read or a corrupt-row-only scan — also maps here; not distinguishable from an embed failure on the wire |
 | 503 | `EMBEDDINGS_UNCONFIGURED` | Semantic search invoked while `LXK_WORKERS_AI_ACCOUNT_ID` or `LXK_WORKERS_AI_API_TOKEN` is unset (the chat tool and MCP tool are absent in that state) |
 | 409 | `PROVIDER_NOT_CONFIGURED` | Assistant generate/test/chat without saved provider settings for the project |
 | 502 | `PROVIDER_AUTH_FAILED` | Upstream 401/403 from the provider or Exa |
@@ -2583,7 +2583,8 @@ DELETE /api/assistant/memory/:projectId/:memoryId
 → 204
 
   Assistant read tools (server-side toolset available to every assistant turn;
-  project-scoped, read-only):
+  semantic_search is chat-turn-only in v1 — the document/delegation task
+  toolset omits it; project-scoped, read-only):
     web_search(query)                    Exa, ≤5 results (only when configured)
     fetch_url(url)                       SSRF-guarded plain text / PDF extract
     read_s3_file(key)                    project attachment text (5 MB cap)

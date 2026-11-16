@@ -7,6 +7,7 @@
 
 import { Effect } from "effect";
 import { queryAll, run, DbError, type BatchStmt, type DbDriver } from "../db/db";
+import { MEMORY_TITLE } from "../../shared/assistant-chunks";
 
 export type EmbeddingKind = "wiki" | "task" | "memory";
 
@@ -102,7 +103,7 @@ export function candidatesForProject(
   return queryAll<CandidateDbRow>(
     db,
     `SELECT e.id, e.kind, e.ref_id, e.chunk_index, e.content, e.embedding,
-            CASE e.kind WHEN 'wiki' THEN w.title WHEN 'task' THEN t.title ELSE 'Project memory' END AS title,
+            CASE e.kind WHEN 'wiki' THEN w.title WHEN 'task' THEN t.title ELSE '${MEMORY_TITLE}' END AS title,
             CASE e.kind WHEN 'wiki' THEN w.slug WHEN 'task' THEN t.key ELSE e.content END AS locator
      FROM assistant_embeddings e
      LEFT JOIN wiki_pages w ON e.kind = 'wiki' AND w.id = e.ref_id

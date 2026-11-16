@@ -121,7 +121,7 @@ const QUERIES: readonly EvalQuery[] = [
   { text: "what is the weather forecast for Berlin tomorrow" },
 ];
 
-const DEFAULT_SWEEP = [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.58, 0.6];
+const DEFAULT_SWEEP = [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.58, 0.6, 0.65, 0.7, 0.75];
 
 const args = process.argv.slice(2);
 

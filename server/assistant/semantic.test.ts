@@ -139,7 +139,7 @@ describe("semanticHint", () => {
     const hint = await semanticHint(driver, CONFIGURED_ENV, "p1", "when do we ship", { fetchImpl });
     expect(hint).toBe(
       "[Possibly relevant — auto-retrieved from project content; not authoritative]\n" +
-        "Release checklist (wiki): Release checklist\nShip on Friday"
+        "Release checklist (wiki): Release checklist\nShip on Friday\n[end of retrieved excerpt]"
     );
   });
 

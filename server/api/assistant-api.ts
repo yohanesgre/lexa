@@ -69,7 +69,7 @@ import { resolveStorageConfig, type StorageConfigShape } from "../storage/config
 import { currentEnv, embeddingsModelFrom, RuntimeEnvLive, storageEnvFrom, type RuntimeEnv } from "../runtime-env";
 import { embeddingsConfigured } from "../assistant/embeddings-client";
 import { embedRefChunks } from "../assistant/embed-ref";
-import { chunkDocument } from "../../shared/assistant-chunks";
+import { chunkDocument, MEMORY_TITLE } from "../../shared/assistant-chunks";
 import { replaceChunksStmts } from "../repos/assistant-embeddings.repo";
 import { getEnv } from "../env";
 import { ApiAuthHooks, type ApiAuthHooksShape } from "./auth-hooks";
@@ -506,7 +506,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
               refId: id,
               projectId: project.id,
               model: embeddingsModelFrom(env),
-              chunks: chunkDocument("Project memory", req.payload.content),
+              chunks: chunkDocument(MEMORY_TITLE, req.payload.content),
             })
           : [];
         const entry = yield* repo.create({ id, projectId: project.id, content: req.payload.content }, chunkStmts);

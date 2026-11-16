@@ -1119,6 +1119,14 @@ Degradation matrix (all four states are contract):
 | Query-time embed failure | Chat tool returns a model-readable error result (turn continues); the auto-inject hint is silently omitted; REST is 502 `EMBEDDINGS_UPSTREAM`. |
 | Model mismatch (`embedding_model` ≠ current) | Rows are skipped by retrieval (treated as absent) until re-embedded — stale-model rows are invisible, never corrupt. |
 
+Module map for the rest of the retrieval path: `server/assistant/semantic.ts`
+sequences query-embed → project scan → cosine ranking → prompt hint
+(constants: `SEMANTIC_HINT_MIN_COSINE = 0.58`, `SEMANTIC_SCAN_CAP = 4096`,
+`SEMANTIC_RESULT_CAP = 5`); `server/assistant/embed-ref.ts` is the
+best-effort post-commit fill shared by every write path; and
+`server/repos/assistant-embeddings.repo.ts` holds the prepared statements
+(replace-chunks, fill-embedding, project- and model-scoped candidate scan).
+
 Invariant #1 compliance: the client is a leaf (env + fetch only) consumed by the
 assistant services; wiki, task, and memory services never import each other or
 the gateway. Chunk-row writes ride each service's existing save batch and emit
