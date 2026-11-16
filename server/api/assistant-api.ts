@@ -66,7 +66,11 @@ import { AuthorizationService } from "../services/authorization.service";
 import { AttachmentService } from "../services/attachment.service";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig, type StorageConfigShape } from "../storage/config";
-import { currentEnv, RuntimeEnvLive, storageEnvFrom, type RuntimeEnv } from "../runtime-env";
+import { currentEnv, embeddingsModelFrom, RuntimeEnvLive, storageEnvFrom, type RuntimeEnv } from "../runtime-env";
+import { embeddingsConfigured } from "../assistant/embeddings-client";
+import { embedRefChunks } from "../assistant/embed-ref";
+import { chunkDocument } from "../../shared/assistant-chunks";
+import { replaceChunksStmts } from "../repos/assistant-embeddings.repo";
 import { getEnv } from "../env";
 import { ApiAuthHooks, type ApiAuthHooksShape } from "./auth-hooks";
 import {
@@ -493,7 +497,21 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectReadById(req.path.projectId);
         const repo = yield* ProjectMemoryRepo;
-        return yield* repo.create({ id: crypto.randomUUID(), projectId: project.id, content: req.payload.content });
+        const db = yield* Db;
+        const env = yield* currentEnv;
+        const id = crypto.randomUUID();
+        const chunkStmts = embeddingsConfigured(env)
+          ? replaceChunksStmts({
+              kind: "memory",
+              refId: id,
+              projectId: project.id,
+              model: embeddingsModelFrom(env),
+              chunks: chunkDocument("Project memory", req.payload.content),
+            })
+          : [];
+        const entry = yield* repo.create({ id, projectId: project.id, content: req.payload.content }, chunkStmts);
+        yield* Effect.promise(() => embedRefChunks(db, env, "memory", id));
+        return entry;
       }))
     )
     .handle("removeAssistantMemory", (req) =>

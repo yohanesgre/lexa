@@ -1,0 +1,35 @@
+// Post-commit vector fill for one source's chunk rows. The chunk rows are
+// written inside the source's save batch (embedding NULL); this runs AFTER
+// that batch commits and fills the BLOBs best-effort: any failure is swallowed
+// and leaves NULLs, which the next save retries. No service dependency — it
+// takes the driver and the env snapshot the caller already resolved.
+
+import { Effect } from "effect";
+import type { DbDriver } from "../db/db";
+import type { RuntimeEnv } from "../env";
+import { encodeEmbedding } from "../../shared/assistant-chunks";
+import { fillEmbedding, nullChunks, type EmbeddingKind } from "../repos/assistant-embeddings.repo";
+import { embedTexts, embeddingsConfigured } from "./embeddings-client";
+
+export async function embedRefChunks(
+  db: DbDriver,
+  env: RuntimeEnv,
+  kind: EmbeddingKind,
+  refId: string
+): Promise<void> {
+  if (!embeddingsConfigured(env)) return;
+  try {
+    const chunks = await Effect.runPromise(nullChunks(db, kind, refId));
+    if (chunks.length === 0) return;
+    const vectors = await embedTexts(env, chunks.map((chunk) => chunk.content));
+    if (vectors === null) return;
+    for (let i = 0; i < chunks.length; i += 1) {
+      const chunk = chunks[i];
+      const vector = vectors[i];
+      if (chunk === undefined || vector === undefined) return;
+      await Effect.runPromise(fillEmbedding(db, chunk.id, encodeEmbedding(Float32Array.from(vector))));
+    }
+  } catch {
+    // Best-effort: the source save already committed; NULLs stay for the next save.
+  }
+}

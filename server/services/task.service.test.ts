@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,9 @@ import { TaskRepo } from "../repos/task.repo";
 import { WipLimitExceeded, RequiredFieldMissing, DeadlineAfterLane } from "../api/errors";
 import type { Actor } from "../../shared/types";
 import { generateTaskKey, parseTaskKey } from "../task-key";
+import { RuntimeEnvLive } from "../runtime-env";
+import type { RuntimeEnv } from "../env";
+import { chunkDocument } from "../../shared/assistant-chunks";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -76,6 +79,31 @@ function makeRepo(db: Database) {
 }
 
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
+
+const UNCONFIGURED: RuntimeEnv = {};
+const EMBEDDINGS_ENV: RuntimeEnv = {
+  LXK_WORKERS_AI_ACCOUNT_ID: "acct-test",
+  LXK_WORKERS_AI_API_TOKEN: "token-test",
+};
+const VECTOR = Array.from({ length: 768 }, (_, i) => (i === 0 ? 1 : 0));
+
+function runWith<A, E>(effect: Effect.Effect<A, E>, env: RuntimeEnv): Promise<A> {
+  return Effect.runPromise(effect.pipe(Effect.provide(RuntimeEnvLive(env))) as Effect.Effect<A, E>);
+}
+
+function stubEmbeddings(): void {
+  vi.stubGlobal("fetch", async (_url: string, init?: RequestInit): Promise<Response> => {
+    const payload = JSON.parse(String(init?.body)) as { input: string[] };
+    return new Response(JSON.stringify({ data: payload.input.map(() => ({ embedding: VECTOR })) }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("TaskService emission", () => {
   it("update emits field_changed rows for each changed field", async () => {
@@ -145,6 +173,112 @@ describe("TaskService emission", () => {
   });
 });
 
+describe("TaskService embeddings", () => {
+  it("unconfigured: create succeeds and writes no chunk rows", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const { task } = await runWith(
+      svc.create(maria, {
+        projectId: "p1",
+        columnId: "c-todo",
+        swimlaneId: "s1",
+        title: "New task",
+        description: "hello",
+        priority: "prio-1",
+        type: "type-1",
+      }),
+      UNCONFIGURED
+    );
+    const n = (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM assistant_embeddings WHERE kind = 'task' AND ref_id = ?")
+        .get(task.id) as { n: number }
+    ).n;
+    expect(n).toBe(0);
+  });
+
+  it("configured: create writes chunk rows and fills every vector", async () => {
+    seed(db);
+    const svc = makeService(db);
+    stubEmbeddings();
+    const { task } = await runWith(
+      svc.create(maria, {
+        projectId: "p1",
+        columnId: "c-todo",
+        swimlaneId: "s1",
+        title: "New task",
+        description: "hello world",
+        priority: "prio-1",
+        type: "type-1",
+      }),
+      EMBEDDINGS_ENV
+    );
+    const expected = chunkDocument("New task", "hello world");
+    const rows = db
+      .prepare(
+        `SELECT chunk_index, content, embedding, embedding_model FROM assistant_embeddings
+         WHERE kind = 'task' AND ref_id = ? ORDER BY chunk_index`
+      )
+      .all(task.id) as { chunk_index: number; content: string; embedding: Uint8Array | null; embedding_model: string }[];
+    expect(rows.map((row) => row.content)).toEqual(expected.map((chunk) => chunk.text));
+    expect(rows.map((row) => row.chunk_index)).toEqual(expected.map((chunk) => chunk.index));
+    for (const row of rows) {
+      expect(row.embedding_model).toBe("@cf/baai/bge-base-en-v1.5");
+      expect(row.embedding).not.toBeNull();
+      expect(row.embedding?.byteLength).toBe(3072);
+    }
+  });
+
+  it("configured: update re-chunks the merged title/description without duplicates", async () => {
+    seed(db);
+    const svc = makeService(db);
+    stubEmbeddings();
+    const { task } = await runWith(
+      svc.create(maria, {
+        projectId: "p1",
+        columnId: "c-todo",
+        swimlaneId: "s1",
+        title: "Old title",
+        description: "old body",
+        priority: "prio-1",
+        type: "type-1",
+      }),
+      EMBEDDINGS_ENV
+    );
+    const selectRows = db.prepare(
+      `SELECT chunk_index, content, embedding, embedding_model FROM assistant_embeddings
+       WHERE kind = 'task' AND ref_id = ? ORDER BY chunk_index`
+    );
+    const before = selectRows.all(task.id) as { chunk_index: number }[];
+    await runWith(svc.update(maria, task.id, { title: "New title", description: "new body" }), EMBEDDINGS_ENV);
+    const expected = chunkDocument("New title", "new body");
+    const rows = selectRows.all(task.id) as {
+      chunk_index: number;
+      content: string;
+      embedding: Uint8Array | null;
+      embedding_model: string;
+    }[];
+    expect(rows.map((row) => row.content)).toEqual(expected.map((chunk) => chunk.text));
+    expect(rows.map((row) => row.chunk_index)).toEqual(expected.map((chunk) => chunk.index));
+    expect(rows.length).toBe(before.length);
+    const duplicates = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM (
+             SELECT chunk_index FROM assistant_embeddings
+             WHERE kind = 'task' AND ref_id = ? GROUP BY chunk_index HAVING COUNT(*) > 1
+           )`
+        )
+        .get(task.id) as { n: number }
+    ).n;
+    expect(duplicates).toBe(0);
+    for (const row of rows) {
+      expect(row.embedding_model).toBe("@cf/baai/bge-base-en-v1.5");
+      expect(row.embedding).not.toBeNull();
+      expect(row.embedding?.byteLength).toBe(3072);
+    }
+  });
+});
 const REAL_DESC = "hi";
 const EMPTY_DOC = "";
 const WS_DOC = "  ";

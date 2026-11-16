@@ -3,6 +3,9 @@ import { Db, queryAll, queryFirst, run, type BatchStmt, type SqlParam, DbError, 
 import { WikiPageRow, rowToWikiPage, rowToWikiPageMeta, WikiPageRevisionRow, rowToWikiPageRevision, rowToWikiPageRevisionSummary } from "../../shared/db";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 
+const WIKI_PAGE_INSERT_SQL = `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
 const WIKI_REVISION_INSERT_SQL = `INSERT INTO wiki_page_revisions (id, page_id, title, slug, content, content_text, save_type)
              VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
@@ -63,7 +66,7 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
         params: [pageId, pageId, keep],
       }),
 
-      create: (input: {
+      createStmt: (input: {
         id: string;
         projectId: string;
         title: string;
@@ -73,26 +76,20 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
         parentId?: string | null;
         position?: number;
         updatedBy?: string | null;
-      }): Effect.Effect<WikiPage, RowNotFound | DbError | ConstraintViolation> =>
-        Effect.gen(function* () {
-          yield* run(
-            db,
-            `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position, updated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            input.id,
-            input.projectId,
-            input.title,
-            input.slug,
-            input.content,
-            input.contentText,
-            input.parentId ?? null,
-            input.position ?? 0,
-            input.updatedBy ?? null
-          );
-          return yield* queryFirst<WikiPageRow>(db, `SELECT * FROM wiki_pages WHERE id = ?`, input.id).pipe(
-            Effect.map(rowToWikiPage)
-          );
-        }),
+      }): BatchStmt => ({
+        sql: WIKI_PAGE_INSERT_SQL,
+        params: [
+          input.id,
+          input.projectId,
+          input.title,
+          input.slug,
+          input.content,
+          input.contentText,
+          input.parentId ?? null,
+          input.position ?? 0,
+          input.updatedBy ?? null,
+        ],
+      }),
 
       findById: (id: string): Effect.Effect<WikiPage, RowNotFound | DbError> =>
         queryFirst<WikiPageRow>(db, `SELECT * FROM wiki_pages WHERE id = ?`, id).pipe(
@@ -181,59 +178,6 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
             }))
           )
         );
-      },
-
-      update: (
-        id: string,
-        input: {
-          title?: string;
-          slug?: string;
-          content?: string;
-          contentText?: string;
-          parentId?: string | null;
-          position?: number;
-          updatedBy?: string | null;
-        }
-      ): Effect.Effect<WikiPage, RowNotFound | DbError | ConstraintViolation> => {
-        const sets: string[] = [];
-        const params: unknown[] = [];
-        if (input.title !== undefined) {
-          sets.push("title = ?");
-          params.push(input.title);
-        }
-        if (input.slug !== undefined) {
-          sets.push("slug = ?");
-          params.push(input.slug);
-        }
-        if (input.content !== undefined) {
-          sets.push("content = ?");
-          params.push(input.content);
-        }
-        if (input.contentText !== undefined) {
-          sets.push("content_text = ?");
-          params.push(input.contentText);
-        }
-        if (input.parentId !== undefined) {
-          sets.push("parent_id = ?");
-          params.push(input.parentId);
-        }
-        if (input.position !== undefined) {
-          sets.push("position = ?");
-          params.push(input.position);
-        }
-        if (input.updatedBy) {
-          sets.push("updated_by = ?");
-          params.push(input.updatedBy);
-        }
-        if (sets.length === 0)
-          return queryFirst<WikiPageRow>(db, `SELECT * FROM wiki_pages WHERE id = ?`, id).pipe(
-            Effect.map(rowToWikiPage)
-          );
-        sets.push("updated_at = datetime('now')");
-        params.push(id);
-        return run(db, `UPDATE wiki_pages SET ${sets.join(", ")} WHERE id = ?`, ...params)
-          .pipe(Effect.flatMap(() => queryFirst<WikiPageRow>(db, `SELECT * FROM wiki_pages WHERE id = ?`, id)))
-          .pipe(Effect.map(rowToWikiPage));
       },
 
       delete: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
