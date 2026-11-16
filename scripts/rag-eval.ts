@@ -12,7 +12,7 @@
 // alignment" tasks), so key-only scoring would mark a correct intent a miss.
 //
 // Usage:
-//   bun scripts/rag-eval.ts [--db PATH] [--project ID] [--threshold N] [--sweep[=0.2,0.3,...]]
+//   bun scripts/rag-eval.ts [--db PATH] [--project ID] [--sweep[=0.2,0.3,...]]
 //
 // Exit code is 0 whenever the evaluation ran; failed rates are printed as FAIL.
 // Unusable arguments or an unopenable DB exit 1.
@@ -134,13 +134,6 @@ function option(name: string): string | undefined {
   return value !== undefined && !value.startsWith("--") ? value : undefined;
 }
 
-const thresholdRaw = option("--threshold");
-const threshold = thresholdRaw === undefined ? SEMANTIC_HINT_MIN_COSINE : Number(thresholdRaw);
-if (!Number.isFinite(threshold)) {
-  console.error(`FAIL invalid --threshold: ${thresholdRaw ?? ""}`);
-  process.exit(1);
-}
-
 applyEnvFile();
 const env = getEnv();
 const dbPath = option("--db") ?? resolveDatabasePath(env);
@@ -169,6 +162,8 @@ function matches(hit: SemanticHit, expected: ExpectedSource): boolean {
 
 interface QueryResult {
   query: EvalQuery;
+  /** True only when semanticSearch returned null (failure); [] is not a failure. */
+  searchFailed: boolean;
   top: SemanticHit | null;
   /** 1-based rank of the first matching top-5 hit; null = miss. */
   rank: number | null;
@@ -209,7 +204,7 @@ for (const query of QUERIES) {
     rank = index === -1 ? null : index + 1;
   }
   const hintHit = expected !== undefined && hint !== null && hint.includes(expected.title);
-  results.push({ query, top: hits?.[0] ?? null, rank, hint, hintHit });
+  results.push({ query, searchFailed: hits === null, top: hits?.[0] ?? null, rank, hint, hintHit });
 
   const score = scoreText(hits?.[0]?.score);
   if (expected === undefined) {
@@ -227,7 +222,8 @@ const positives = results.filter((result) => result.query.expected !== undefined
 const negatives = results.filter((result) => result.query.expected === undefined);
 const topFiveHits = positives.filter((result) => result.rank !== null).length;
 const hintHits = positives.filter((result) => result.hintHit).length;
-const nullSearches = results.filter((result) => result.top === null).length;
+const failedSearches = results.filter((result) => result.searchFailed).length;
+const emptySearches = results.filter((result) => !result.searchFailed && result.top === null).length;
 
 const hitScores = positives
   .filter((result) => result.rank !== null)
@@ -251,9 +247,9 @@ const formatRange = (values: readonly number[]): string => {
 console.log("");
 console.log("summary");
 console.log(`  project ${projectId}   db ${dbPath}`);
-console.log(`  positives ${positives.length}   negatives ${negatives.length}   null search results ${nullSearches}`);
-if (nullSearches > 0) {
-  console.log(`  FAIL ${nullSearches}/${results.length} queries returned null (env/credentials/provider/DB failure)`);
+console.log(`  positives ${positives.length}   negatives ${negatives.length}   failed searches ${failedSearches}   empty results ${emptySearches}`);
+if (failedSearches > 0) {
+  console.log(`  FAIL ${failedSearches}/${results.length} semanticSearch calls returned null (env/credentials/provider/DB failure)`);
 }
 console.log(`  top-5 recall          ${topFiveHits}/${positives.length} (${percent(topFiveHits, positives.length)})`);
 console.log(
