@@ -23,6 +23,8 @@ import {
 } from "./jev";
 
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, withToolTimeout } from "./tool-caps";
+import type { EmbeddingKind } from "../repos/assistant-embeddings.repo";
+import { SEMANTIC_RESULT_CAP, type SemanticHit } from "./semantic";
 export { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS };
 
 const SNIPPET_CAP = 500;
@@ -117,6 +119,10 @@ export interface AssistantToolDeps {
   searchTasksByTitle: (query: string, limit?: number) => Promise<TaskRef[]>;
   searchWikiPages: (query: string, limit?: number) => Promise<WikiSearchHit[]>;
   findWikiPageBySlug: (slug: string) => Promise<WikiPageContent | null>;
+  // Semantic retrieval over the project's wiki/task/memory chunks. Present
+  // only when the Workers AI env is configured: absent → no `semantic_search`
+  // tool at all (discovery stays consistent with the REST/MCP surface).
+  semanticSearch?: ((query: string, limit: number, kinds?: readonly EmbeddingKind[]) => Promise<SemanticHit[] | null>) | undefined;
   listAllTasks: () => Promise<TaskRef[]>;
   listWikiPagesFull: () => Promise<WikiPageContent[]>;
   getBoardStructure: () => Promise<BoardStructure>;
@@ -460,6 +466,48 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
     })
   );
 
+  // Same retrieval core as the REST endpoint and the MCP tool, offered only
+  // when the run resolved the Workers AI env. No threshold: the model asked,
+  // so it gets the ranking (the prompt hint is the thresholded path).
+  if (deps.semanticSearch) {
+    const semanticSearch = deps.semanticSearch;
+    tools.push(
+      toolDefinition({
+        name: "semantic_search",
+        description:
+          "Search this project semantically: wiki pages, task descriptions and project memory, ranked by embedding similarity. Use it when the user's wording may differ from the source text. Returns at most 5 results with kind, title, snippet and locator (wiki slug, task key, or memory content).",
+        inputSchema: z.object({
+          query: z.string().min(1).describe("Natural-language query"),
+          limit: z.coerce.number().int().min(1).max(SEMANTIC_RESULT_CAP).optional().catch(SEMANTIC_RESULT_CAP),
+          kinds: z.array(z.enum(["wiki", "task", "memory"])).optional().describe("Restrict to these source kinds"),
+        }),
+        outputSchema: z.object({
+          results: z.array(
+            z.object({
+              kind: z.enum(["wiki", "task", "memory"]),
+              title: z.string(),
+              snippet: z.string(),
+              locator: z.string(),
+            })
+          ),
+          error: z.string().optional(),
+        }),
+      }).server(async ({ query, limit, kinds }) => {
+        const effectiveLimit = typeof limit === "number" && Number.isFinite(limit) ? limit : SEMANTIC_RESULT_CAP;
+        const hits = await semanticSearch(query, effectiveLimit, kinds);
+        if (hits === null) return { results: [], error: "semantic search unavailable" };
+        return {
+          results: hits.map((hit) => ({
+            kind: hit.kind,
+            title: hit.title,
+            snippet: hit.snippet,
+            locator: hit.locator,
+          })),
+        };
+      })
+    );
+  }
+
   tools.push(
     toolDefinition({
       name: "read_wiki_page",
@@ -658,6 +706,9 @@ export function toolCallDetail(name: string, rawArgs: unknown): string | undefin
   switch (name) {
     case "search_wiki":
       detail = quoted("Searching wiki for", str("query"));
+      break;
+    case "semantic_search":
+      detail = quoted("Searching project for", str("query"));
       break;
     case "read_wiki_page":
       detail = quoted("Reading wiki page", str("slug"));
