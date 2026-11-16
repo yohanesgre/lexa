@@ -6,7 +6,7 @@
 // chunking, cosine ranking and thresholding are pure functions elsewhere.
 
 import { Effect } from "effect";
-import { queryAll, run, DbError, type BatchStmt, type DbDriver } from "../db/db";
+import { queryAll, DbError, type BatchStmt, type DbDriver } from "../db/db";
 import { MEMORY_TITLE } from "../../shared/assistant-chunks";
 
 export type EmbeddingKind = "wiki" | "task" | "memory";
@@ -74,18 +74,16 @@ export function nullChunks(
   );
 }
 
-/** Fill one chunk's vector after commit. Id-addressed: a chunk replaced by a
- *  newer save no longer exists and the UPDATE matches 0 rows. */
-export function fillEmbedding(db: DbDriver, id: string, blob: Uint8Array): Effect.Effect<void, DbError> {
-  return run(
-    db,
-    `UPDATE assistant_embeddings SET embedding = ?, updated_at = datetime('now') WHERE id = ?`,
-    blob,
-    id
-  ).pipe(
-    Effect.mapError((e) => (e instanceof DbError ? e : new DbError({ message: e.message, cause: e }))),
-    Effect.asVoid
-  );
+/** Fill statements for a source's post-commit vector fill, as ONE batch so a
+ *  long document's many chunks cost one driver round-trip instead of N.
+ *  Id-addressed: a chunk replaced by a newer save matches 0 rows. */
+export function fillEmbeddingStmts(
+  updates: readonly { id: string; blob: Uint8Array }[]
+): BatchStmt[] {
+  return updates.map((update) => ({
+    sql: `UPDATE assistant_embeddings SET embedding = ?, updated_at = datetime('now') WHERE id = ?`,
+    params: [update.blob, update.id],
+  }));
 }
 
 /** Embeddable chunks of a project for the current model, with the live source
