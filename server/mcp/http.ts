@@ -14,6 +14,7 @@ import { resolveMaxApiBody } from "../api/limits";
 import { apiRateLimiter } from "../api/rate-limit";
 import { resolveTrustedOrigins, type RuntimeEnv } from "../env";
 import { MCP_SERVER_INFO, registerLexaTools } from "./catalog";
+import { embeddingsConfigured } from "../assistant/embeddings-client";
 import type { McpAuthenticate, McpIdentity, McpRestDispatch } from "./rest";
 
 export const MCP_PATH = "/mcp";
@@ -126,7 +127,7 @@ export async function handleMcpRequest(req: Request, deps: McpBoundaryDeps): Pro
   transport.onerror = (error) => console.warn(`[MCP] transport error: ${error.message}`);
 
   try {
-    registerLexaTools(server, deps.dispatch);
+    registerLexaTools(server, deps.dispatch, { embeddingsConfigured: embeddingsConfigured(deps.env) });
     await server.connect(transport);
     const response = await transport.handleRequest(req);
     return secured(response);
