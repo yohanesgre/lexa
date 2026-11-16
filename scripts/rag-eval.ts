@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 // Semantic-hint calibration harness for the seeded dev corpus.
 //
-// THE QUERY SET IS A SYNTHETIC PROXY, NOT THE OWNER'S PARAPHRASE SET: the owner
-// left the query form blank, so these queries were written from the seed
-// corpus text before any score was seen. A pass here says the threshold
-// separates these queries; it is not the owner metric.
+// THE QUERY SET IS A CORPUS-GROUNDED PROXY, NOT THE OWNER'S PARAPHRASE SET: the
+// owner left the query form blank, so these queries were written from the seed
+// corpus text before any score for them was seen. The seed wiki page is titled
+// "Test" and project memory is empty, so every positive targets a task. A pass
+// here says the threshold separates these queries; it is not the owner metric.
 //
 // Scoring: a top-5 result counts as a hit when its kind+locator match the
 // expected source OR its title equals the expected title. The seed corpus
@@ -43,7 +44,7 @@ interface EvalQuery {
   expected?: ExpectedSource;
 }
 
-// 15 paraphrases written from the corpus source text, then 5 off-topic
+// 21 paraphrases written from the corpus source text, then 8 off-topic
 // negatives that must not clear the hint threshold.
 const QUERIES: readonly EvalQuery[] = [
   {
@@ -114,11 +115,38 @@ const QUERIES: readonly EvalQuery[] = [
     text: "Spin up a throwaway site per change so designers don't need a local checkout",
     expected: { kind: "task", locator: "P1-57", title: "[TEST] Set up preview deploys for frontend changes" },
   },
+  {
+    text: "Find out why the money-transfer callbacks keep silently failing",
+    expected: { kind: "task", locator: "P1-46", title: "[TEST] Investigate payment webhook failures" },
+  },
+  {
+    text: "Refresh the oversized banner that greets visitors on the public site",
+    expected: { kind: "task", locator: "P1-48", title: "Update landing page hero section" },
+  },
+  {
+    text: "The menu that unfolds under the top bar is unusable on phones",
+    expected: { kind: "task", locator: "P1-49", title: "Fix navigation dropdown on mobile devices" },
+  },
+  {
+    text: "Add automated checks around the sign-in and session code",
+    expected: { kind: "task", locator: "P1-50", title: "Write unit tests for user authentication module" },
+  },
+  {
+    text: "Look into what other companies charge and how they structure their plans",
+    expected: { kind: "task", locator: "P1-51", title: "Research competitor pricing models" },
+  },
+  {
+    text: "Draft the welcome message series for newly signed-up people",
+    expected: { kind: "task", locator: "P1-52", title: "Design onboarding email sequence" },
+  },
   { text: "how do I bake sourdough bread" },
   { text: "what is the capital of France" },
   { text: "best hiking trails in Bali" },
   { text: "recommend a sci-fi novel" },
   { text: "what is the weather forecast for Berlin tomorrow" },
+  { text: "how do I renew my passport" },
+  { text: "teach me beginner piano chords" },
+  { text: "what is the best time of year to visit Japan" },
 ];
 
 const DEFAULT_SWEEP = [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.58, 0.6, 0.65, 0.7, 0.75];
