@@ -120,6 +120,7 @@ const DOCUMENTED: DocumentedCode[] = [
   // 502
   { code: "GITHUB_API_ERROR", status: 502 },
   { code: "SOURCE_FETCH_ERROR", status: 502 },
+  { code: "EMBEDDINGS_UPSTREAM", status: 502 },
   { code: "PROVIDER_AUTH_FAILED", status: 502 },
   { code: "PROVIDER_UNREACHABLE", status: 502 },
   { code: "ASSISTANT_GENERATION_FAILED", status: 502 },
@@ -128,6 +129,8 @@ const DOCUMENTED: DocumentedCode[] = [
   { code: "JEV_AUTH_FAILED", status: 502 },
   { code: "JEV_UNREACHABLE", status: 502 },
   { code: "GITHUB_MANIFEST_EXCHANGE_FAILED", status: 502 },
+  // 503
+  { code: "EMBEDDINGS_UNCONFIGURED", status: 503 },
   // Reserved in the error map but never raised by a REST handler (see the doc).
   { code: "MISSING_AUTH", status: null },
   { code: "INVALID_API_KEY", status: null },
@@ -137,6 +140,8 @@ const DOCUMENTED: DocumentedCode[] = [
   { code: "LXK_MAX_BODY_MB", status: null },
   { code: "LXK_MAX_UPLOAD_MB", status: null },
   { code: "LXK_SECRETS_MASTER_KEY", status: null },
+  { code: "LXK_WORKERS_AI_ACCOUNT_ID", status: null },
+  { code: "LXK_WORKERS_AI_API_TOKEN", status: null },
 ];
 
 // Codes the error map owns: the tag → documented status + envelope code.
@@ -209,6 +214,7 @@ const TAG_MAP: TaggedCode[] = [
   { code: "GITHUB_SECRET_WRITE_FAILED", status: 500, tag: "GithubSecretWriteFailed" },
   { code: "GITHUB_API_ERROR", status: 502, tag: "GithubApiError" },
   { code: "SOURCE_FETCH_ERROR", status: 502, tag: "SourceFetchError" },
+  { code: "EMBEDDINGS_UPSTREAM", status: 502, tag: "EmbeddingsUpstream" },
   { code: "PROVIDER_AUTH_FAILED", status: 502, tag: "ProviderAuthFailed" },
   { code: "PROVIDER_UNREACHABLE", status: 502, tag: "ProviderUnreachable" },
   { code: "ASSISTANT_GENERATION_FAILED", status: 502, tag: "AssistantGenerationFailed" },
@@ -217,6 +223,7 @@ const TAG_MAP: TaggedCode[] = [
   { code: "JEV_AUTH_FAILED", status: 502, tag: "JevAuthFailed" },
   { code: "JEV_UNREACHABLE", status: 502, tag: "JevUnreachable" },
   { code: "GITHUB_MANIFEST_EXCHANGE_FAILED", status: 502, tag: "GithubManifestExchangeFailed" },
+  { code: "EMBEDDINGS_UNCONFIGURED", status: 503, tag: "EmbeddingsUnconfigured" },
 ];
 
 // Documented codes with no envelope-map tag (middleware / handler wrapper / doc only).
@@ -251,7 +258,7 @@ describe("error catalog matrix (docs/API.md §Error Envelope)", () => {
     const table = new Set(DOCUMENTED.map((d) => d.code));
     expect([...documented].filter((c) => !table.has(c))).toEqual([]);
     expect([...table].filter((c) => !documented.has(c))).toEqual([]);
-    expect(table.size).toBe(86);
+    expect(table.size).toBe(90);
   });
 
   it("maps every tag-backed documented code to its documented status and envelope code", () => {
@@ -264,7 +271,7 @@ describe("error catalog matrix (docs/API.md §Error Envelope)", () => {
       }
     }
     expect(failures).toEqual([]);
-    expect(TAG_MAP).toHaveLength(75);
+    expect(TAG_MAP).toHaveLength(77);
   });
 
   it("emits the codes without an envelope-map tag with their documented status", () => {
