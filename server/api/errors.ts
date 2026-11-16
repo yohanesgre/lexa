@@ -126,6 +126,11 @@ export class AssistantScheduleNotFound extends Data.TaggedError("AssistantSchedu
 export class AssistantTaskActive extends Data.TaggedError("AssistantTaskActive")<{}> {}
 export class AssistantThreadNotFound extends Data.TaggedError("AssistantThreadNotFound")<{ documentType: string; documentId: string }> {}
 export class VisionNotConfigured extends Data.TaggedError("VisionNotConfigured")<{}> {}
+// Semantic search needs the Workers AI account id/token (unconfigured = 503);
+// only the query-time embedding call is user-facing (upstream = 502 after one
+// retry) — write-path embedding failures stay silent NULLs.
+export class EmbeddingsUnconfigured extends Data.TaggedError("EmbeddingsUnconfigured")<{}> {}
+export class EmbeddingsUpstream extends Data.TaggedError("EmbeddingsUpstream")<{}> {}
 export class ApprovalNotFound extends Data.TaggedError("ApprovalNotFound")<{ id: string }> {}
 export class ApprovalExpired extends Data.TaggedError("ApprovalExpired")<{ id: string }> {}
 export class ApprovalAlreadyDecided extends Data.TaggedError("ApprovalAlreadyDecided")<{ id: string; status: string }> {}
@@ -232,6 +237,8 @@ export const errorCodeMap: Record<string, string> = {
   AssistantTaskActive: "ASSISTANT_TASK_ACTIVE",
   AssistantThreadNotFound: "ASSISTANT_THREAD_NOT_FOUND",
   VisionNotConfigured: "VISION_NOT_CONFIGURED",
+  EmbeddingsUnconfigured: "EMBEDDINGS_UNCONFIGURED",
+  EmbeddingsUpstream: "EMBEDDINGS_UPSTREAM",
   ApprovalNotFound: "APPROVAL_NOT_FOUND",
   ApprovalExpired: "APPROVAL_EXPIRED",
   ApprovalAlreadyDecided: "APPROVAL_ALREADY_DECIDED",
@@ -380,7 +387,10 @@ export function errorToStatus(error: { _tag: string }): number {
     case "McpToolCallFailed":
     case "JevAuthFailed":
     case "JevUnreachable":
+    case "EmbeddingsUpstream":
       return 502;
+    case "EmbeddingsUnconfigured":
+      return 503;
     case "GithubSecretWriteFailed":
     case "DbError":
       return 500;
@@ -537,6 +547,10 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `No Assistant thread exists for ${error.documentType} '${error.documentId}'`;
     case "VisionNotConfigured":
       return `Image attachments need vision — enable primary image support or configure a vision model in Settings`;
+    case "EmbeddingsUnconfigured":
+      return "Semantic search is not configured — set the Workers AI account id and token";
+    case "EmbeddingsUpstream":
+      return "Semantic search is temporarily unavailable — try again";
     case "ApprovalNotFound":
       return "Approval not found";
     case "ApprovalExpired":
