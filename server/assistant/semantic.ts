@@ -16,7 +16,7 @@ import { EMBEDDING_DIMENSIONS, embedTexts, embeddingsConfigured } from "./embedd
 
 /** Minimum top-1 cosine for the auto-injected prompt hint (calibrated by the
  *  paraphrase eval; bge cosine for genuinely related text typically ≥0.4). */
-export const SEMANTIC_HINT_MIN_COSINE = 0.3;
+export const SEMANTIC_HINT_MIN_COSINE = 0.58;
 /** Freshest chunks per scan — the scan budget, never the result count. */
 export const SEMANTIC_SCAN_CAP = 4096;
 /** Default result count for the tool and the REST default. */

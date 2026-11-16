@@ -1097,9 +1097,11 @@ export function embeddingsConfigured(env: RuntimeEnv): boolean
   // and LXK_WORKERS_AI_API_TOKEN are set
 
 export async function embedTexts(env: RuntimeEnv, texts: string[], opts?: { fetchImpl?: FetchLike }): Promise<number[][] | null>
-  // unconfigured → null. Batches of ≤100 texts per call; 10 s timeout per call;
-  // one retry on 5xx/network; response data[i].embedding; every vector length
-  // validated = 768 (mismatch → null + log, never a corrupt row).
+  // unconfigured → null. Batches of ≤100 texts per call; one 10 s deadline
+  // covers the whole embedTexts invocation — every batch, retry and the
+  // 404/405 fallback share it; one retry on 5xx/network; response
+  // data[i].embedding; every vector length validated = 768 (mismatch → null +
+  // log, never a corrupt row).
   // NEVER throws across a service boundary: total failure returns null, and the
   // caller treats it as "no vectors this time".
 ```
