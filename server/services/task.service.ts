@@ -7,7 +7,7 @@ import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ConstraintViolation, DbError, RowNotFound, Db, withTx, run, batch, type BatchStmt } from "../db/db";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
-import { isMarkdownEmpty } from "../../shared/markdown";
+import { isMarkdownEmpty, markdownToText } from "../../shared/markdown";
 import {
   TaskNotFound,
   TaskHasChildren,
@@ -24,6 +24,12 @@ import {
   errorMessage,
 } from "../api/errors";
 import { ActivityService } from "./activity.service";
+import { currentEnv, embeddingsModelFrom } from "../runtime-env";
+import type { RuntimeEnv } from "../env";
+import { embeddingsConfigured } from "../assistant/embeddings-client";
+import { embedRefChunks } from "../assistant/embed-ref";
+import { chunkDocument } from "../../shared/assistant-chunks";
+import { replaceChunksStmts } from "../repos/assistant-embeddings.repo";
 import * as msg from "../activity-messages";
 import {
   buildActivityStmts,
@@ -166,7 +172,8 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         assignees?: string[];
         dueAt?: string | null;
       },
-      viaAssistant: boolean
+      viaAssistant: boolean,
+      chunkModel: string | null
     ): Effect.Effect<
       { stmts: BatchStmt[]; activityCount: number },
       ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | DbError | RowNotFound
@@ -241,6 +248,17 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
           activity: rows,
         });
+        if (chunkModel !== null && (input.title !== undefined || input.description !== undefined)) {
+          stmts.push(
+            ...replaceChunksStmts({
+              kind: "task",
+              refId: task.id,
+              projectId: task.projectId,
+              model: chunkModel,
+              chunks: chunkDocument(merged.title, markdownToText(merged.description)),
+            })
+          );
+        }
         return { stmts, activityCount: rows.length };
       });
 
@@ -442,6 +460,8 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const project = yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
           );
+          const env = yield* currentEnv;
+          const configured = embeddingsConfigured(env);
 
           // Subtask: inherit the parent's column/swimlane.
           let parent: Task | null = null;
@@ -502,7 +522,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             );
             const position = keyAfter(last?.position ?? null);
             const taskId = crypto.randomUUID();
-            yield* batch(db, buildTaskCreateBatch({
+            const stmts = buildTaskCreateBatch({
               id: taskId,
               projectId: input.projectId,
               columnId,
@@ -517,7 +537,19 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               assignees: input.assignees ?? [],
               ...(parent ? { subtaskOfParentId: parent.id } : {}),
               activity: [asInput(actor, "created", msg.created(actor.label), opts?.viaAssistant === true)],
-            }));
+            });
+            if (configured) {
+              stmts.push(
+                ...replaceChunksStmts({
+                  kind: "task",
+                  refId: taskId,
+                  projectId: input.projectId,
+                  model: embeddingsModelFrom(env),
+                  chunks: chunkDocument(input.title, markdownToText(desc)),
+                })
+              );
+            }
+            yield* batch(db, stmts);
             return yield* taskRepo.findById(taskId).pipe(
               Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
             );
@@ -529,6 +561,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               () => doInsert
             )
           );
+          yield* Effect.promise(() => embedRefChunks(db, env, "task", task.id));
           // The activity read-back runs AFTER the batch commits: on Bun a
           // read-back failure no longer rolls back the create (D1 always
           // behaved this way — no request-level transaction).
@@ -581,8 +614,17 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const task = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
           );
-          const plan = yield* planUpdate(singleCtx(task), actor, input, opts?.viaAssistant === true);
+          const env = yield* currentEnv;
+          const configured = embeddingsConfigured(env);
+          const plan = yield* planUpdate(
+            singleCtx(task),
+            actor,
+            input,
+            opts?.viaAssistant === true,
+            configured ? embeddingsModelFrom(env) : null
+          );
           if (plan.stmts.length > 0) yield* batch(db, plan.stmts);
+          yield* Effect.promise(() => embedRefChunks(db, env, "task", id));
           const updated = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
           );
@@ -762,7 +804,8 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       ctx: TaskCtx,
       actor: Actor,
       input: BulkTaskInput,
-      viaAssistant: boolean
+      viaAssistant: boolean,
+      env: RuntimeEnv
     ): Effect.Effect<
       void,
       TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound
@@ -789,8 +832,9 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               ...(input.type !== undefined ? { type: input.type } : {}),
               ...(input.assignees !== undefined ? { assignees: input.assignees } : {}),
               ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
-            }, viaAssistant);
+            }, viaAssistant, embeddingsConfigured(env) ? embeddingsModelFrom(env) : null);
             if (plan.stmts.length > 0) yield* batch(db, plan.stmts);
+            yield* Effect.promise(() => embedRefChunks(db, env, "task", task.id));
             return;
           }
           case "archive":
@@ -830,6 +874,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return yield* new InvalidArgs({ reason: `bulk accepts at most ${BULK_TASK_ID_CAP} ids` });
         }
         const viaAssistant = opts?.viaAssistant === true;
+        const env = yield* currentEnv;
         // Prefetch every requested row in ONE project-scoped query; a missing
         // id (or one from another project) is absent → TASK_NOT_FOUND per task.
         const rows = yield* taskRepo.findByIdsForProject(projectId, ids);
@@ -858,7 +903,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           // the WIP guard is a conditional UPDATE that changes 0 rows when it
           // rejects), and the item's writes are one atomic `batch()`. So a
           // `failed` entry never leaves a partial write behind.
-          const outcome = yield* applyOneBulk({ task, columns, lanes, priorities, types }, actor, input, viaAssistant).pipe(
+          const outcome = yield* applyOneBulk({ task, columns, lanes, priorities, types }, actor, input, viaAssistant, env).pipe(
             Effect.as({ ok: true as const }),
             Effect.catchTags({
               TaskNotFound: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),

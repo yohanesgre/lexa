@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,9 @@ import { DbBunLive } from "../db/db";
 import { WikiService } from "./wiki.service";
 import { WikiShareService } from "./wiki-share.service";
 import { ShareLinkNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent } from "../api/errors";
+import { RuntimeEnvLive } from "../runtime-env";
+import type { RuntimeEnv } from "../env";
+import { chunkDocument } from "../../shared/assistant-chunks";
 // Documents use their persisted Markdown source directly.
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -57,6 +60,40 @@ function makeService(db: Database) {
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, WikiService);
 }
+
+const UNCONFIGURED: RuntimeEnv = {};
+const EMBEDDINGS_ENV: RuntimeEnv = {
+  LXK_WORKERS_AI_ACCOUNT_ID: "acct-test",
+  LXK_WORKERS_AI_API_TOKEN: "token-test",
+};
+const VECTOR = Array.from({ length: 768 }, (_, i) => (i === 0 ? 1 : 0));
+
+function runWith<A, E>(effect: Effect.Effect<A, E>, env: RuntimeEnv): Promise<A> {
+  return Effect.runPromise(effect.pipe(Effect.provide(RuntimeEnvLive(env))) as Effect.Effect<A, E>);
+}
+
+function stubEmbeddings(): void {
+  vi.stubGlobal("fetch", async (_url: string, init?: RequestInit): Promise<Response> => {
+    const payload = JSON.parse(String(init?.body)) as { input: string[] };
+    return new Response(JSON.stringify({ data: payload.input.map(() => ({ embedding: VECTOR })) }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+}
+
+function chunkRows(pageId: string) {
+  return db
+    .prepare(
+      `SELECT chunk_index, content, embedding, embedding_model FROM assistant_embeddings
+       WHERE kind = 'wiki' AND ref_id = ? ORDER BY chunk_index`
+    )
+    .all(pageId) as { chunk_index: number; content: string; embedding: Uint8Array | null; embedding_model: string }[];
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("WikiService.create", () => {
   it("slug uniqueness is per project — same slug in another project is fine", async () => {
@@ -209,6 +246,60 @@ describe("WikiService.search", () => {
     const originalMatches = await Effect.runPromise(svc.search("p1", "alpha"));
     expect(originalMatches).toHaveLength(1);
     expect(originalMatches[0]!.content).toBe("alpha source");
+  });
+});
+
+describe("WikiService embeddings", () => {
+  it("unconfigured: create and update succeed and write zero chunk rows", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const page = await runWith(svc.create("p1", { title: "Guide", content: "alpha" }), UNCONFIGURED);
+    const updated = await runWith(svc.update(page.id, { title: "Guide 2", content: "beta" }), UNCONFIGURED);
+    expect(updated.title).toBe("Guide 2");
+    const n = (db.prepare("SELECT COUNT(*) AS n FROM assistant_embeddings").get() as { n: number }).n;
+    expect(n).toBe(0);
+  });
+
+  it("configured: create writes chunk rows and fills every vector", async () => {
+    seed(db);
+    const svc = makeService(db);
+    stubEmbeddings();
+    const page = await runWith(
+      svc.create("p1", { title: "Guide", content: "alpha beta" }),
+      EMBEDDINGS_ENV
+    );
+    const expected = chunkDocument("Guide", "alpha beta");
+    const rows = chunkRows(page.id);
+    expect(rows.map((row) => row.content)).toEqual(expected.map((chunk) => chunk.text));
+    expect(rows.map((row) => row.chunk_index)).toEqual(expected.map((chunk) => chunk.index));
+    for (const row of rows) {
+      expect(row.embedding_model).toBe("@cf/baai/bge-base-en-v1.5");
+      expect(row.embedding).not.toBeNull();
+      expect(row.embedding?.byteLength).toBe(3072);
+    }
+  });
+
+  it("configured: re-save replaces the chunk set without duplicate rows", async () => {
+    seed(db);
+    const svc = makeService(db);
+    stubEmbeddings();
+    const page = await runWith(svc.create("p1", { title: "Guide", content: "alpha" }), EMBEDDINGS_ENV);
+    await runWith(svc.update(page.id, { content: "beta gamma" }), EMBEDDINGS_ENV);
+    const expected = chunkDocument("Guide", "beta gamma");
+    const rows = chunkRows(page.id);
+    expect(rows.map((row) => row.content)).toEqual(expected.map((chunk) => chunk.text));
+    const duplicates = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM (
+             SELECT chunk_index FROM assistant_embeddings
+             WHERE kind = 'wiki' AND ref_id = ? GROUP BY chunk_index HAVING COUNT(*) > 1
+           )`
+        )
+        .get(page.id) as { n: number }
+    ).n;
+    expect(duplicates).toBe(0);
+    expect(rows.every((row) => row.embedding !== null)).toBe(true);
   });
 });
 

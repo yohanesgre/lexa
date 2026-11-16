@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryFirst, queryAll, batch, batchResults, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryFirst, queryAll, batch, batchResults, DbError, RowNotFound, ConstraintViolation, type BatchStmt } from "../db/db";
 import type { ID, ISODate } from "../../shared/types";
 
 export interface ProjectMemoryEntry {
@@ -39,7 +39,7 @@ export class ProjectMemoryRepo extends Effect.Service<ProjectMemoryRepo>()("Lexa
     const db = yield* Db;
 
     return {
-      create: (input: { id: string; projectId: string; content: string; source?: "manual" | "assistant" }): Effect.Effect<ProjectMemoryEntry, ConstraintViolation | DbError> =>
+      create: (input: { id: string; projectId: string; content: string; source?: "manual" | "assistant" }, extraStmts: BatchStmt[] = []): Effect.Effect<ProjectMemoryEntry, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           // Content write + FTS index update in one atomic batch (no triggers).
           yield* batch(db, [
@@ -51,6 +51,7 @@ export class ProjectMemoryRepo extends Effect.Service<ProjectMemoryRepo>()("Lexa
               sql: `INSERT INTO project_memory_fts(rowid, content) SELECT rowid, content FROM project_memory WHERE id = ?`,
               params: [input.id],
             },
+            ...extraStmts,
           ]);
           const rows = yield* queryAll<ProjectMemoryRow>(db, `SELECT * FROM project_memory WHERE id = ?`, input.id);
           return rowToEntry(rows[0]!);

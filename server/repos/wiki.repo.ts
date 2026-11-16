@@ -3,6 +3,9 @@ import { Db, queryAll, queryFirst, run, type BatchStmt, type SqlParam, DbError, 
 import { WikiPageRow, rowToWikiPage, rowToWikiPageMeta, WikiPageRevisionRow, rowToWikiPageRevision, rowToWikiPageRevisionSummary } from "../../shared/db";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 
+const WIKI_PAGE_INSERT_SQL = `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
 const WIKI_REVISION_INSERT_SQL = `INSERT INTO wiki_page_revisions (id, page_id, title, slug, content, content_text, save_type)
              VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
@@ -63,6 +66,31 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
         params: [pageId, pageId, keep],
       }),
 
+      createStmt: (input: {
+        id: string;
+        projectId: string;
+        title: string;
+        slug: string;
+        content: string;
+        contentText: string;
+        parentId?: string | null;
+        position?: number;
+        updatedBy?: string | null;
+      }): BatchStmt => ({
+        sql: WIKI_PAGE_INSERT_SQL,
+        params: [
+          input.id,
+          input.projectId,
+          input.title,
+          input.slug,
+          input.content,
+          input.contentText,
+          input.parentId ?? null,
+          input.position ?? 0,
+          input.updatedBy ?? null,
+        ],
+      }),
+
       create: (input: {
         id: string;
         projectId: string;
@@ -77,8 +105,7 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
         Effect.gen(function* () {
           yield* run(
             db,
-            `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position, updated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            WIKI_PAGE_INSERT_SQL,
             input.id,
             input.projectId,
             input.title,

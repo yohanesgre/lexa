@@ -6,6 +6,11 @@ import { ConstraintViolation, DbError, RowNotFound, Db, batch, withTx, type Batc
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent, SearchError } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import { markdownToText } from "../../shared/markdown";
+import { currentEnv, embeddingsModelFrom } from "../runtime-env";
+import { embeddingsConfigured } from "../assistant/embeddings-client";
+import { embedRefChunks } from "../assistant/embed-ref";
+import { chunkDocument } from "../../shared/assistant-chunks";
+import { replaceChunksStmts } from "../repos/assistant-embeddings.repo";
 
 export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService", {
   dependencies: [WikiRepo.Default, ProjectRepo.Default, UserRepo.Default],
@@ -55,13 +60,14 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
       ): Effect.Effect<WikiPage, ProjectNotFound | SlugTaken | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* validateProject(projectId);
+          const env = yield* currentEnv;
           const slug = input.slug || slugify(input.title);
           const position = yield* repo.maxPosition(projectId, input.parentId ?? null);
           const id = crypto.randomUUID();
           const content = input.content ?? "";
           const contentText = markdownToText(content);
-          const page = yield* repo
-            .create({
+          const stmts: BatchStmt[] = [
+            repo.createStmt({
               id,
               projectId,
               title: input.title,
@@ -71,8 +77,22 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
               parentId: input.parentId ?? null,
               position: position + 1,
               updatedBy: input.updatedBy ?? null,
-            })
-            .pipe(Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })));
+            }),
+          ];
+          if (embeddingsConfigured(env)) {
+            stmts.push(
+              ...replaceChunksStmts({
+                kind: "wiki",
+                refId: id,
+                projectId,
+                model: embeddingsModelFrom(env),
+                chunks: chunkDocument(input.title, contentText),
+              })
+            );
+          }
+          yield* batch(db, stmts).pipe(Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })));
+          const page = yield* repo.findById(id);
+          yield* Effect.promise(() => embedRefChunks(db, env, "wiki", id));
           yield* Effect.logInfo(`[Wiki] Created page ${page.id} in project ${page.projectId}`);
           return yield* withUpdatedByName(page);
         }),
@@ -132,74 +152,94 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
         saveType: "autosave" | "manual" = "autosave",
         updatedBy: string | null = null
       ): Effect.Effect<WikiPage, WikiPageNotFound | InvalidParent | SlugTaken | DbError | ConstraintViolation> =>
-        withTx(db, Effect.gen(function* () {
-          // The cycle-check reads, validation and the write set (revision
-          // insert + prune + page update) run inside one `withTx`. On Bun
-          // `withTx` is a real BEGIN IMMEDIATE, so the check and the batch are
-          // serialized against a reciprocal reparent; on D1 `withTx` is a
-          // documented no-op and the batch stays atomic, but the
-          // check-vs-write window remains the accepted residual.
-          const current = yield* repo.findById(id).pipe(
-            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
-          );
-          const nextParentId = input.parentId;
-          if (nextParentId !== undefined && nextParentId !== current.parentId) {
-            if (nextParentId === id) {
-              return yield* new InvalidParent({ reason: "self" });
+        Effect.gen(function* () {
+          const env = yield* currentEnv;
+          const configured = embeddingsConfigured(env);
+          const updated = yield* withTx(db, Effect.gen(function* () {
+            // The cycle-check reads, validation and the write set (revision
+            // insert + prune + page update) run inside one `withTx`. On Bun
+            // `withTx` is a real BEGIN IMMEDIATE, so the check and the batch are
+            // serialized against a reciprocal reparent; on D1 `withTx` is a
+            // documented no-op and the batch stays atomic, but the
+            // check-vs-write window remains the accepted residual.
+            const current = yield* repo.findById(id).pipe(
+              Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+            );
+            const nextParentId = input.parentId;
+            if (nextParentId !== undefined && nextParentId !== current.parentId) {
+              if (nextParentId === id) {
+                return yield* new InvalidParent({ reason: "self" });
+              }
+              if (nextParentId !== null) {
+                const parent = yield* repo.findById(nextParentId).pipe(
+                  Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: nextParentId }))
+                );
+                if (parent.projectId !== current.projectId) {
+                  return yield* new InvalidParent({ reason: "cross-project" });
+                }
+                const cycle = yield* repo.isDescendant(nextParentId, id);
+                if (cycle) {
+                  return yield* new InvalidParent({ reason: "cycle" });
+                }
+              }
             }
-            if (nextParentId !== null) {
-              const parent = yield* repo.findById(nextParentId).pipe(
-                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: nextParentId }))
+            const stmts: BatchStmt[] = [
+              repo.createRevisionStmt(
+                current.id,
+                current.title,
+                current.slug,
+                current.content,
+                markdownToText(current.content),
+                saveType
+              ),
+              // Prune: keep the newest 100 revisions per page (same batch as
+              // the insert — no unbounded revision growth).
+              repo.pruneRevisionsStmt(current.id),
+            ];
+            const updateStmt = repo.updateStmt(id, {
+              ...(input.title !== undefined ? { title: input.title } : {}),
+              ...(input.slug !== undefined ? { slug: input.slug } : {}),
+              ...(input.content !== undefined
+                ? { content: input.content, contentText: markdownToText(input.content) }
+                : {}),
+              ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+              ...(input.position !== undefined ? { position: input.position } : {}),
+              updatedBy,
+            });
+            if (updateStmt) stmts.push(updateStmt);
+            if (configured && (input.title !== undefined || input.content !== undefined)) {
+              stmts.push(
+                ...replaceChunksStmts({
+                  kind: "wiki",
+                  refId: id,
+                  projectId: current.projectId,
+                  model: embeddingsModelFrom(env),
+                  chunks: chunkDocument(
+                    input.title ?? current.title,
+                    markdownToText(input.content ?? current.content)
+                  ),
+                })
               );
-              if (parent.projectId !== current.projectId) {
-                return yield* new InvalidParent({ reason: "cross-project" });
-              }
-              const cycle = yield* repo.isDescendant(nextParentId, id);
-              if (cycle) {
-                return yield* new InvalidParent({ reason: "cycle" });
-              }
             }
-          }
-          const stmts: BatchStmt[] = [
-            repo.createRevisionStmt(
-              current.id,
-              current.title,
-              current.slug,
-              current.content,
-              markdownToText(current.content),
-              saveType
-            ),
-            // Prune: keep the newest 100 revisions per page (same batch as
-            // the insert — no unbounded revision growth).
-            repo.pruneRevisionsStmt(current.id),
-          ];
-          const updateStmt = repo.updateStmt(id, {
-            ...(input.title !== undefined ? { title: input.title } : {}),
-            ...(input.slug !== undefined ? { slug: input.slug } : {}),
-            ...(input.content !== undefined
-              ? { content: input.content, contentText: markdownToText(input.content) }
-              : {}),
-            ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
-            ...(input.position !== undefined ? { position: input.position } : {}),
-            updatedBy,
-          });
-          if (updateStmt) stmts.push(updateStmt);
-          yield* batch(db, stmts).pipe(
-            Effect.catchIf(
-              (e) => e instanceof ConstraintViolation && isSlugConflict(e),
-              () => new SlugTaken({ slug: input.slug ?? current.slug })
-            ),
-            Effect.catchIf(
-              (e) => e instanceof ConstraintViolation && isForeignKeyFailure(e),
-              () => new WikiPageNotFound({ id })
-            )
-          );
-          const updated = yield* repo.findById(id).pipe(
-            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
-          );
-          yield* Effect.logInfo(`[Wiki] Updated page ${updated.id}`);
-          return yield* withUpdatedByName(updated);
-        })),
+            yield* batch(db, stmts).pipe(
+              Effect.catchIf(
+                (e) => e instanceof ConstraintViolation && isSlugConflict(e),
+                () => new SlugTaken({ slug: input.slug ?? current.slug })
+              ),
+              Effect.catchIf(
+                (e) => e instanceof ConstraintViolation && isForeignKeyFailure(e),
+                () => new WikiPageNotFound({ id })
+              )
+            );
+            const refreshed = yield* repo.findById(id).pipe(
+              Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+            );
+            yield* Effect.logInfo(`[Wiki] Updated page ${refreshed.id}`);
+            return yield* withUpdatedByName(refreshed);
+          }));
+          yield* Effect.promise(() => embedRefChunks(db, env, "wiki", id));
+          return updated;
+        }),
 
       listRevisions: (
         pageSlug: string,
@@ -222,6 +262,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
       ): Effect.Effect<WikiPage, ProjectNotFound | WikiPageNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* validateProject(projectId);
+          const env = yield* currentEnv;
           const page = yield* repo.findBySlug(projectId, pageSlug).pipe(
             Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: pageSlug }))
           );
@@ -250,10 +291,22 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
             contentText,
             "manual"
           ));
+          if (embeddingsConfigured(env)) {
+            stmts.push(
+              ...replaceChunksStmts({
+                kind: "wiki",
+                refId: page.id,
+                projectId: page.projectId,
+                model: embeddingsModelFrom(env),
+                chunks: chunkDocument(revision.title, contentText),
+              })
+            );
+          }
           yield* batch(db, stmts);
           const restored = yield* repo.findById(page.id).pipe(
             Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
           );
+          yield* Effect.promise(() => embedRefChunks(db, env, "wiki", page.id));
           return yield* withUpdatedByName(restored);
         }),
 
