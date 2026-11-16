@@ -144,7 +144,7 @@ describe("semanticHint", () => {
   });
 
   it("returns null when the best hit is below the threshold", async () => {
-    // e2 is orthogonal to every seeded vector: top score 0 < 0.30.
+    // e2 is orthogonal to every seeded vector: top score 0 < 0.58.
     queryVector = sparseVector({ 2: 1 });
     const hint = await semanticHint(driver, CONFIGURED_ENV, "p1", "unrelated wording", { fetchImpl });
     expect(hint).toBeNull();

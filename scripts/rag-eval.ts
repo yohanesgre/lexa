@@ -134,6 +134,13 @@ function option(name: string): string | undefined {
   return value !== undefined && !value.startsWith("--") ? value : undefined;
 }
 
+const KNOWN_FLAGS: Record<string, true> = { "--db": true, "--project": true, "--sweep": true };
+for (const arg of args) {
+  if (!arg.startsWith("--")) continue;
+  const name = arg.split("=")[0] ?? arg;
+  if (KNOWN_FLAGS[name] !== true) console.log(`warn: ignoring unknown flag ${name}`);
+}
+
 applyEnvFile();
 const env = getEnv();
 const dbPath = option("--db") ?? resolveDatabasePath(env);
@@ -258,7 +265,7 @@ console.log(
     positives.length
   )}) via semanticHint`
 );
-console.log(`  top-1 score, hits     ${formatRange(hitScores)}`);
+console.log(`  top-1 score, top-5 hits  ${formatRange(hitScores)}`);
 console.log(`  top-1 score, misses   ${formatRange(missScores)}`);
 console.log(
   `  negatives top-1       ${formatRange(negativeScores)}; hints emitted ${negativeHints}/${negatives.length} (FAIL when > 0 at the chosen threshold)`
@@ -267,13 +274,19 @@ console.log(
 const sweepRaw = option("--sweep");
 const sweepRequested = args.some((arg) => arg === "--sweep" || arg.startsWith("--sweep="));
 if (sweepRequested) {
+  const tokens = sweepRaw === undefined ? [] : sweepRaw.split(",");
+  const dropped = tokens.filter((token) => token.trim() === "" || !Number.isFinite(Number(token.trim())));
+  if (dropped.length > 0) {
+    console.log(
+      `warn: --sweep dropped non-numeric tokens: ${dropped.map((token) => token.trim() || "(empty)").join(", ")}`
+    );
+  }
   const sweep =
     sweepRaw === undefined
       ? DEFAULT_SWEEP
-      : sweepRaw
-          .split(",")
-          .map((value) => Number(value.trim()))
-          .filter((value) => Number.isFinite(value));
+      : tokens
+          .filter((token) => token.trim() !== "" && Number.isFinite(Number(token.trim())))
+          .map((token) => Number(token.trim()));
   if (sweep.length === 0) {
     console.error(`FAIL empty --sweep list: ${sweepRaw ?? ""}`);
     process.exit(1);
