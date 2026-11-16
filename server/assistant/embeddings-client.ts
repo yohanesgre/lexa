@@ -39,14 +39,30 @@ export async function embedTexts(
   const model = env.LXK_EMBEDDINGS_MODEL?.trim() || EMBEDDINGS_MODEL_DEFAULT;
   const primaryUrl = `${API_BASE}/${accountId}/ai/v1/embeddings`;
   const fallbackUrl = `${API_BASE}/${accountId}/ai/run/${model}`;
-  const vectors: number[][] = [];
-  for (let start = 0; start < texts.length; start += BATCH_SIZE) {
-    const batch = texts.slice(start, start + BATCH_SIZE);
-    const batchVectors = await embedBatch({ primaryUrl, fallbackUrl, token, model, batch, fetchImpl });
-    if (batchVectors === null) return null;
-    vectors.push(...batchVectors);
+  // One deadline for the whole call — every batch, retry and fallback shares it.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const vectors: number[][] = [];
+    for (let start = 0; start < texts.length; start += BATCH_SIZE) {
+      if (controller.signal.aborted) return null;
+      const batch = texts.slice(start, start + BATCH_SIZE);
+      const batchVectors = await embedBatch({
+        primaryUrl,
+        fallbackUrl,
+        token,
+        model,
+        batch,
+        signal: controller.signal,
+        fetchImpl,
+      });
+      if (batchVectors === null) return null;
+      vectors.push(...batchVectors);
+    }
+    return vectors;
+  } finally {
+    clearTimeout(timer);
   }
-  return vectors;
 }
 
 type AttemptResult =
@@ -60,34 +76,38 @@ interface BatchConfig {
   token: string;
   model: string;
   batch: string[];
+  signal: AbortSignal;
   fetchImpl: typeof fetch;
 }
 
 // One retry on 5xx or a thrown network/timeout error; the 404/405 fallback is
-// internal to an attempt and does not consume the retry budget.
+// internal to an attempt and does not consume the retry budget. The call-level
+// deadline is terminal: an aborted signal starts no retry and no next batch.
 async function embedBatch(cfg: BatchConfig): Promise<number[][] | null> {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    if (cfg.signal.aborted) return null;
     const result = await attemptBatch(cfg);
     if (result.kind === "ok") return result.vectors;
     if (result.kind === "fail") return null;
+    if (cfg.signal.aborted) return null;
   }
   return null;
 }
 
 async function attemptBatch(cfg: BatchConfig): Promise<AttemptResult> {
-  const primary = await postJson(cfg.primaryUrl, { model: cfg.model, input: cfg.batch }, cfg.token, cfg.fetchImpl);
+  const primary = await postJson(cfg.primaryUrl, { model: cfg.model, input: cfg.batch }, cfg.token, cfg.signal, cfg.fetchImpl);
   if (primary.kind === "network") return { kind: "retry" };
   if (primary.status === 404 || primary.status === 405) {
-    const fallback = await postJson(cfg.fallbackUrl, { text: cfg.batch }, cfg.token, cfg.fetchImpl);
+    const fallback = await postJson(cfg.fallbackUrl, { text: cfg.batch }, cfg.token, cfg.signal, cfg.fetchImpl);
     if (fallback.kind === "network") return { kind: "retry" };
     if (!fallback.ok) return fallback.status >= 500 ? { kind: "retry" } : { kind: "fail" };
-    const vectors = parseVectors(objectField(objectField(fallback.body, "result"), "data"), cfg.batch.length);
+    const vectors = parseVectors(objectField(objectField(fallback.body, "result"), "data"), cfg.batch.length, cfg.model);
     return vectors === null ? { kind: "fail" } : { kind: "ok", vectors };
   }
   if (!primary.ok) return primary.status >= 500 ? { kind: "retry" } : { kind: "fail" };
   const entries = objectField(primary.body, "data");
   if (!Array.isArray(entries) || entries.length !== cfg.batch.length) return { kind: "fail" };
-  const vectors = parseVectors(entries.map((entry) => objectField(entry, "embedding")), cfg.batch.length);
+  const vectors = parseVectors(entries.map((entry) => objectField(entry, "embedding")), cfg.batch.length, cfg.model);
   return vectors === null ? { kind: "fail" } : { kind: "ok", vectors };
 }
 
@@ -95,36 +115,33 @@ type HttpResult =
   | { kind: "network" }
   | { kind: "response"; ok: boolean; status: number; body: unknown };
 
-// The abort timer covers the response body too: a stalled body must not outlive
-// the 10 s per-call budget the caller relies on.
+// The caller's signal bounds fetch and body read together; a stalled body must
+// not outlive the call's 10 s deadline. A body read that fails or aborts cancels
+// the stream so workerd does not leave the subrequest open.
 async function postJson(
   url: string,
   payload: unknown,
   token: string,
+  signal: AbortSignal,
   fetchImpl: typeof fetch
 ): Promise<HttpResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetchImpl(url, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify(payload),
-      signal: controller.signal,
+      signal,
     });
     if (!res.ok) return { kind: "response", ok: false, status: res.status, body: undefined };
-    let body: unknown;
     try {
-      body = await res.json();
+      return { kind: "response", ok: true, status: res.status, body: await res.json() };
     } catch {
-      if (controller.signal.aborted) return { kind: "network" };
-      body = undefined;
+      await res.body?.cancel().catch(() => {});
+      if (signal.aborted) return { kind: "network" };
+      return { kind: "response", ok: true, status: res.status, body: undefined };
     }
-    return { kind: "response", ok: true, status: res.status, body };
   } catch {
     return { kind: "network" };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -136,12 +153,17 @@ function objectField(value: unknown, key: string): unknown {
 // Every vector must be exactly EMBEDDING_DIMENSIONS long; a mismatch means the
 // provider contract changed, so the batch is dropped rather than persisted as a
 // corrupt row. One warning per bad batch.
-function parseVectors(raw: unknown, expectedCount: number): number[][] | null {
-  if (!Array.isArray(raw) || raw.length !== expectedCount) return null;
+function parseVectors(raw: unknown, expectedCount: number, model: string): number[][] | null {
+  if (!Array.isArray(raw) || raw.length !== expectedCount) {
+    console.warn(`[embeddings] unexpected vector count for model ${model} — expected ${expectedCount}; dropping batch`);
+    return null;
+  }
   const vectors: number[][] = [];
   for (const value of raw) {
     if (!Array.isArray(value) || value.length !== EMBEDDING_DIMENSIONS || value.some((n) => typeof n !== "number")) {
-      console.warn(`[embeddings] unexpected vector shape — expected ${EMBEDDING_DIMENSIONS} dimensions; dropping batch`);
+      console.warn(
+        `[embeddings] unexpected vector shape for model ${model} — expected ${expectedCount} vectors of ${EMBEDDING_DIMENSIONS} dimensions; dropping batch`
+      );
       return null;
     }
     vectors.push(value as number[]);

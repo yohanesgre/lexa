@@ -94,13 +94,28 @@ describe("embedTexts", () => {
     }
   });
 
-  it("falls back to /ai/run when the embeddings endpoint answers 404", async () => {
+  it("batches 105 texts into two sequential requests and keeps slice order", async () => {
+    const texts = Array.from({ length: 105 }, (_, i) => String(i));
+    const batchSizes: number[] = [];
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { input: string[] };
+      batchSizes.push(body.input.length);
+      return json({ data: body.input.map((text) => ({ embedding: vector(Number(text)) })) });
+    }) as unknown as typeof fetch;
+
+    const result = await embedTexts(CONFIGURED, texts, { fetchImpl });
+    expect(batchSizes).toEqual([100, 5]);
+    expect(result).toHaveLength(105);
+    expect(result?.map((value) => value[0])).toEqual(texts.map((_, i) => i));
+  });
+
+  it.each([404, 405])("falls back to /ai/run when the embeddings endpoint answers %i", async (status) => {
     const embedding = vector(0.75);
     const urls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL) => {
       const url = String(input);
       urls.push(url);
-      if (url.endsWith("/ai/v1/embeddings")) return json({ errors: [{ code: 404 }] }, 404);
+      if (url.endsWith("/ai/v1/embeddings")) return json({ errors: [{ code: status }] }, status);
       return json({ result: { data: [embedding] } });
     }) as unknown as typeof fetch;
 
@@ -124,7 +139,7 @@ describe("embedTexts", () => {
     expect(calls).toBe(2);
   });
 
-  it("times out a stalled response body instead of waiting for it", async () => {
+  it("returns null when the call deadline aborts a stalled response body", async () => {
     vi.useFakeTimers();
     try {
       let calls = 0;
@@ -145,7 +160,7 @@ describe("embedTexts", () => {
       const pending = embedTexts(CONFIGURED, ["alpha"], { fetchImpl });
       await vi.advanceTimersByTimeAsync(20_000);
       expect(await pending).toBeNull();
-      expect(calls).toBe(2);
+      expect(calls).toBe(1);
     } finally {
       vi.useRealTimers();
     }
